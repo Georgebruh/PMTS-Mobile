@@ -22,6 +22,12 @@ export const glyphs = {
     { type: 'path', d: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z' },
     { type: 'path', d: 'M9.6 12.9l2 2 3.8-3.9' },
   ],
+  // Feature C: offline state of the sync indicator — the cloudcheck cloud
+  // with a slash instead of the check (no equivalent exists in the mockup).
+  cloudoff: [
+    { type: 'path', d: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z' },
+    { type: 'path', d: 'M5.5 5.5l13 13' },
+  ],
   clock: [
     { type: 'circle', cx: 12, cy: 12, r: 8.5 },
     { type: 'path', d: 'M12 7.5V12l3 1.8' },

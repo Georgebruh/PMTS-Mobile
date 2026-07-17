@@ -21,6 +21,8 @@ import { theme } from '../theme';
 export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const signIn = useSession((s) => s.signIn);
+  const notice = useSession((s) => s.notice);
+  const clearNotice = useSession((s) => s.clearNotice);
   const pinRef = useRef<TextInput>(null);
 
   const [email, setEmail] = useState('');
@@ -34,6 +36,7 @@ export function LoginScreen() {
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
+    clearNotice();
     try {
       await signIn(email, pin);
       // Success unmounts this screen via the root auth switch.
@@ -74,6 +77,20 @@ export function LoginScreen() {
             Property Management Tracking System
           </Text>
         </View>
+
+        {notice !== null && (
+          <View
+            style={{
+              backgroundColor: theme.status.orange.bg,
+              borderRadius: theme.radii.md,
+              paddingHorizontal: theme.spacing.md,
+              paddingVertical: 10,
+              marginBottom: theme.spacing.md,
+            }}
+          >
+            <Text style={[theme.text.body, { color: theme.status.orange.text }]}>{notice}</Text>
+          </View>
+        )}
 
         <Card style={{ padding: theme.spacing.xl, gap: theme.spacing.lg }}>
           <Field

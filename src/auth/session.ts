@@ -1,10 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
+import { wipeLocalDatabase } from '../database/database';
 import { loginRequest, type SessionUser } from './api';
 import { upsertLocalUser } from './localUser';
 
 const SESSION_KEY = 'pmts.session';
+/** id of the last account that signed in on this device — drives the wipe. */
+const LAST_USER_KEY = 'pmts.lastUserId';
 
 type PersistedSession = {
   token: string;
@@ -19,10 +22,13 @@ type SessionState = {
   user: SessionUser | null;
   /** L2→L1 downgrade toggle. Only meaningful while user.role_level === 2. */
   actAsL1: boolean;
+  /** Why the user was signed out (e.g. token expiry) — login screen shows it. */
+  notice: string | null;
   restore: () => Promise<void>;
   signIn: (email: string, pin: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: (notice?: string) => Promise<void>;
   setActAsL1: (on: boolean) => Promise<void>;
+  clearNotice: () => void;
 };
 
 async function persistSession(session: PersistedSession): Promise<void> {
@@ -34,6 +40,7 @@ export const useSession = create<SessionState>((set, get) => ({
   token: null,
   user: null,
   actAsL1: false,
+  notice: null,
 
   // Session restore is fully offline — only the first-ever login needs the
   // network (accepted behaviour: users has no credential column locally).
@@ -66,16 +73,42 @@ export const useSession = create<SessionState>((set, get) => ({
   // Throws LoginError — the login screen catches and renders it.
   signIn: async (email, pin) => {
     const { token, user } = await loginRequest(email, pin);
+
+    // Frozen Feature C decision: a different account (or no recorded history —
+    // first Feature-C-era login) gets a clean database, so area/location-scoped
+    // rows never leak between users of a shared phone. Same-user re-login
+    // keeps everything, including writes still queued for push. The previous
+    // user's queued writes were best-effort flushed at their logout
+    // (flushAndSignOut); whatever could not flush is gone by design.
+    const lastUserId = await SecureStore.getItemAsync(LAST_USER_KEY).catch(() => null);
+    if (lastUserId !== user.id) {
+      await wipeLocalDatabase();
+      await SecureStore.setItemAsync(LAST_USER_KEY, user.id).catch((e) =>
+        console.warn('failed to record last user id:', e),
+      );
+    }
+
     await upsertLocalUser(user).catch((e) => console.warn('user mirror upsert failed:', e));
     await persistSession({ token, user, actAsL1: false });
-    set({ status: 'signedIn', token, user, actAsL1: false });
+    set({ status: 'signedIn', token, user, actAsL1: false, notice: null });
   },
 
-  signOut: async () => {
+  // Prefer flushAndSignOut (syncManager) from UI — it pushes queued writes
+  // first. Direct signOut is for forced paths like token expiry.
+  signOut: async (notice) => {
     await SecureStore.deleteItemAsync(SESSION_KEY).catch(() => {});
-    // The local DB stays — wipe-on-user-switch is decided in Feature C.
-    set({ status: 'signedOut', token: null, user: null, actAsL1: false });
+    // The local DB stays — same-user re-login keeps offline work; a
+    // different user logging in wipes it (see signIn).
+    set({
+      status: 'signedOut',
+      token: null,
+      user: null,
+      actAsL1: false,
+      notice: notice ?? null,
+    });
   },
+
+  clearNotice: () => set({ notice: null }),
 
   setActAsL1: async (on) => {
     const { token, user } = get();

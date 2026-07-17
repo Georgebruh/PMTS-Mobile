@@ -57,6 +57,15 @@ function findUserByEmail_(email) {
   return null;
 }
 
+/** id = the row's client_uuid (what verifyToken() returns as uid). */
+function findUserById_(id) {
+  var rows = readRows_(getSheet_(usersSheetName_()));
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].id || '').trim() === id) return rows[i];
+  }
+  return null;
+}
+
 /** Sheets hand back TRUE, "TRUE", "yes", 1 … depending on how cells were filled. */
 function isTruthyCell_(v) {
   if (v === true) return true;
