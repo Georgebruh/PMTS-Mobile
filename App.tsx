@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useSession } from './src/auth/session';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { useSyncLifecycle } from './src/sync/syncManager';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -27,6 +28,10 @@ export default function App() {
   });
   const status = useSession((s) => s.status);
   const restore = useSession((s) => s.restore);
+
+  // Feature C: sync on sign-in/app open, foreground, local writes, interval,
+  // reconnect — active only while signed in.
+  useSyncLifecycle();
 
   useEffect(() => {
     restore();
