@@ -1,6 +1,19 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // expo-asset/src carries a `@ts-expect-error: Never read locally` that only
+    // "errors" (and is thus consumed) when unused locals are flagged — Expo
+    // compiles its shipped source with this on, so consumers need it too.
+    "noUnusedLocals": true,
+    // RN 0.86's legacy .d.ts files deep-import react-native/types/* and
+    // react-native/Libraries/*, but the package's exports map blocks those
+    // subpaths under bundler resolution — which silently unresolves
+    // Constructor/HostInstance and breaks <View>/<Text> JSX typing.
+    // These paths overrides let the legacy types reach their own internals.
+    "paths": {
+      "react-native/types/*": ["./node_modules/react-native/types/*"],
+      "react-native/Libraries/*": ["./node_modules/react-native/Libraries/*"]
+    }
   }
 }
