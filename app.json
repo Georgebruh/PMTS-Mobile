@@ -21,7 +21,7 @@
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
-      "@morrowdigital/watermelondb-expo-plugin"
+      ["@morrowdigital/watermelondb-expo-plugin", { "disableJsi": true }]
     ],
     "web": {
       "favicon": "./assets/favicon.png"
