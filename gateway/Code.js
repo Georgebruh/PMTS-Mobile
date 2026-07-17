@@ -35,6 +35,12 @@ function route_(e, method) {
     if (method === 'POST' && path === 'login') {
       return json_(handleLogin_(parseBody_(e)));
     }
+    if (method === 'POST' && path === 'sync/pull') {
+      return json_(handlePull_(parseBody_(e)));
+    }
+    if (method === 'POST' && path === 'sync/push') {
+      return json_(handlePush_(parseBody_(e)));
+    }
     if (method === 'GET' && path === 'ping') {
       return json_({ ok: true, service: 'pmts-gateway', time: new Date().toISOString() });
     }
@@ -58,9 +64,15 @@ function json_(obj) {
   );
 }
 
-/** Run once from the editor: authorizes the script and proves setup works. */
+/**
+ * Run once from the editor: authorizes the script and proves setup works —
+ * script properties reachable, all 8 tabs exist with every synced column.
+ */
 function smokeCheck() {
   getRequiredProp_('PMTS_TOKEN_SECRET');
-  var sheet = getSheet_(usersSheetName_());
-  Logger.log('OK: tab "' + sheet.getName() + '" with ' + (sheet.getLastRow() - 1) + ' data row(s)');
+  Object.keys(TABLE_SPECS).forEach(function (table) {
+    var sheet = sheetForTable_(table);
+    requireHeaders_(sheet, table);
+    Logger.log('OK: tab "' + sheet.getName() + '" with ' + (sheet.getLastRow() - 1) + ' data row(s)');
+  });
 }
