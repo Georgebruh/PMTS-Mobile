@@ -1,10 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
+import { wipeLocalDatabase } from '../database/database';
 import { loginRequest, type SessionUser } from './api';
 import { upsertLocalUser } from './localUser';
 
 const SESSION_KEY = 'pmts.session';
+/** id of the last account that signed in on this device — drives the wipe. */
+const LAST_USER_KEY = 'pmts.lastUserId';
 
 type PersistedSession = {
   token: string;
@@ -70,6 +73,21 @@ export const useSession = create<SessionState>((set, get) => ({
   // Throws LoginError — the login screen catches and renders it.
   signIn: async (email, pin) => {
     const { token, user } = await loginRequest(email, pin);
+
+    // Frozen Feature C decision: a different account (or no recorded history —
+    // first Feature-C-era login) gets a clean database, so area/location-scoped
+    // rows never leak between users of a shared phone. Same-user re-login
+    // keeps everything, including writes still queued for push. The previous
+    // user's queued writes were best-effort flushed at their logout
+    // (flushAndSignOut); whatever could not flush is gone by design.
+    const lastUserId = await SecureStore.getItemAsync(LAST_USER_KEY).catch(() => null);
+    if (lastUserId !== user.id) {
+      await wipeLocalDatabase();
+      await SecureStore.setItemAsync(LAST_USER_KEY, user.id).catch((e) =>
+        console.warn('failed to record last user id:', e),
+      );
+    }
+
     await upsertLocalUser(user).catch((e) => console.warn('user mirror upsert failed:', e));
     await persistSession({ token, user, actAsL1: false });
     set({ status: 'signedIn', token, user, actAsL1: false, notice: null });
