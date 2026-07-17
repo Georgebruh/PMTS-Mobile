@@ -33,6 +33,7 @@ export default function App() {
         const assetCount = await assets.query().fetchCount();
         if (!cancelled) setSmoke({ phase: 'ok', assetCount });
       } catch (e) {
+        console.error('WatermelonDB smoke test failed:', e);
         const error = e instanceof Error ? e.message : String(e);
         if (!cancelled) setSmoke({ phase: 'failed', error });
       }
