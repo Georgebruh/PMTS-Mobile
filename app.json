@@ -28,7 +28,8 @@
         }
       ],
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-secure-store"
     ],
     "web": {
       "favicon": "./assets/favicon.png"
