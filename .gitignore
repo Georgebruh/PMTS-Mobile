@@ -34,6 +34,9 @@ yarn-error.*
 .env
 .env*.local
 
+# clasp binding to the owner's Apps Script project (see gateway/.clasp.json.example)
+gateway/.clasp.json
+
 # typescript
 *.tsbuildinfo
 
