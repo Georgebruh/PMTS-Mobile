@@ -4,21 +4,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { theme } from '../theme';
 import { Icon } from './Icon';
+import { OfflineBanner } from './OfflineBanner';
+import { SyncIndicator } from './SyncIndicator';
 
 type Props = {
   title: string;
   dateLine?: string;
-  /** Renders the sync cloud-check green (Feature C wires the real state). */
-  synced?: boolean;
   /** Shows the notification dot on the bell (Feature M wires the real state). */
   hasNotifications?: boolean;
   children: ReactNode;
 };
 
-// Tab-screen scaffold from the mockup: header (title + sync + bell), optional
-// date line, scrollable body. Bottom padding leaves room for the floating nav
-// pill + FAB that Feature D adds.
-export function Screen({ title, dateLine, synced, hasNotifications, children }: Props) {
+// Tab-screen scaffold from the mockup: header (title + live sync indicator +
+// bell), offline banner, optional date line, scrollable body. Bottom padding
+// leaves room for the floating nav pill + FAB that Feature D adds.
+export function Screen({ title, dateLine, hasNotifications, children }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -36,10 +36,7 @@ export function Screen({ title, dateLine, synced, hasNotifications, children }: 
         <Text style={theme.text.screenTitle}>{title}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <HeaderIconButton>
-            <Icon
-              name="cloudcheck"
-              color={synced ? theme.colors.syncGreen : theme.colors.ink}
-            />
+            <SyncIndicator />
           </HeaderIconButton>
           <HeaderIconButton>
             <Icon name="bell" />
@@ -47,6 +44,8 @@ export function Screen({ title, dateLine, synced, hasNotifications, children }: 
           </HeaderIconButton>
         </View>
       </View>
+
+      <OfflineBanner />
 
       {dateLine !== undefined && (
         <Text

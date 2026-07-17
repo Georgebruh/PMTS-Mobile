@@ -1,10 +1,14 @@
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Q } from '@nozbe/watermelondb';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, Switch, Text, View } from 'react-native';
 
 import { useRole, useSession } from '../auth/session';
 import { Card } from '../components/Card';
 import { Pill } from '../components/Pill';
 import { SectionHead } from '../components/SectionHead';
 import { Screen } from '../components/Screen';
+import { database } from '../database/database';
+import { flushAndSignOut, useSyncStatus } from '../sync/syncManager';
 import { theme } from '../theme';
 
 const ROLE_TITLES = {
@@ -19,8 +23,8 @@ export function HomeScreen() {
   const user = useSession((s) => s.user);
   const actAsL1 = useSession((s) => s.actAsL1);
   const setActAsL1 = useSession((s) => s.setActAsL1);
-  const signOut = useSession((s) => s.signOut);
   const role = useRole();
+  const [signingOut, setSigningOut] = useState(false);
 
   if (!user || role === null) return null; // unmounts via the root switch
 
@@ -92,8 +96,21 @@ export function HomeScreen() {
         </Text>
       </Card>
 
+      <SectionHead title="Sync" />
+      <SyncStatusCard userId={user.id} userEmail={user.email} />
+
       <Pressable
-        onPress={signOut}
+        onPress={async () => {
+          // Pushes queued writes first (best-effort) — the Feature C rule that
+          // a later different-user login's wipe can't eat this user's work.
+          setSigningOut(true);
+          try {
+            await flushAndSignOut();
+          } finally {
+            setSigningOut(false);
+          }
+        }}
+        disabled={signingOut}
         style={({ pressed }) => ({
           marginTop: theme.spacing.xxl,
           height: theme.sizes.button,
@@ -103,12 +120,91 @@ export function HomeScreen() {
           backgroundColor: theme.colors.white,
           alignItems: 'center',
           justifyContent: 'center',
+          opacity: signingOut ? 0.55 : 1,
         })}
       >
-        <Text style={{ fontFamily: theme.fonts.bold, fontSize: 15, color: theme.colors.red }}>
-          Log out
-        </Text>
+        {signingOut ? (
+          <ActivityIndicator color={theme.colors.red} />
+        ) : (
+          <Text style={{ fontFamily: theme.fonts.bold, fontSize: 15, color: theme.colors.red }}>
+            Log out
+          </Text>
+        )}
       </Pressable>
     </Screen>
+  );
+}
+
+const PHASE_LABELS = {
+  idle: 'Synced',
+  syncing: 'Syncing…',
+  offline: 'Offline',
+  error: 'Sync failed — retrying',
+} as const;
+
+// Feature C status readout + dev-only write probe. The probe is how the
+// airplane-mode gate is exercised before Features E–J add real write screens;
+// it appends a TEST_SYNC asset_history event (append-only, safe to clean from
+// the sheet afterwards). Both retire when the real dashboard lands (Feature E).
+function SyncStatusCard({ userId, userEmail }: { userId: string; userEmail: string }) {
+  const phase = useSyncStatus((s) => s.phase);
+  const pending = useSyncStatus((s) => s.pending);
+  const lastSyncedAt = useSyncStatus((s) => s.lastSyncedAt);
+  const errorMessage = useSyncStatus((s) => s.errorMessage);
+
+  const statusLine = phase === 'idle' && pending ? 'Changes waiting to sync' : PHASE_LABELS[phase];
+  const lastLine = lastSyncedAt
+    ? `Last synced ${new Date(lastSyncedAt).toLocaleTimeString('en-PH', {
+        hour: 'numeric',
+        minute: '2-digit',
+      })}`
+    : 'Not synced yet this session';
+
+  const writeTestRow = async () => {
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      return;
+    }
+    await database.write(async () => {
+      await database.get('asset_history').create((h: any) => {
+        h.asset.set(assets[0]);
+        h.historyCode = ''; // display codes are server-assigned
+        h.eventType = 'TEST_SYNC';
+        h.actor = userId;
+        h.notes = `dev sync probe from ${userEmail}`;
+        h.eventAt = new Date();
+      });
+    });
+    // No manual sync call — the write-batch trigger must pick this up itself.
+  };
+
+  return (
+    <Card style={{ padding: theme.spacing.lg, gap: 6 }}>
+      <Text style={theme.text.cardTitle}>{statusLine}</Text>
+      <Text style={theme.text.caption}>{lastLine}</Text>
+      {phase === 'error' && errorMessage !== null && (
+        <Text style={[theme.text.caption, { color: theme.colors.red }]}>{errorMessage}</Text>
+      )}
+      {__DEV__ && (
+        <Pressable
+          onPress={writeTestRow}
+          style={({ pressed }) => ({
+            marginTop: 6,
+            alignSelf: 'flex-start',
+            borderRadius: theme.radii.md,
+            borderWidth: 1,
+            borderColor: theme.colors.line,
+            backgroundColor: pressed ? theme.colors.bg : theme.colors.white,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: 8,
+          })}
+        >
+          <Text style={[theme.text.caption, { color: theme.colors.ink }]}>
+            DEV · Write test history row
+          </Text>
+        </Pressable>
+      )}
+    </Card>
   );
 }
