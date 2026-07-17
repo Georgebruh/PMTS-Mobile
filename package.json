@@ -22,6 +22,7 @@
     "@babel/plugin-transform-class-properties": "^7.29.7",
     "@babel/plugin-transform-private-methods": "^7.29.7",
     "@babel/plugin-transform-private-property-in-object": "^7.29.7",
+    "@google/clasp": "^3.3.0",
     "@morrowdigital/watermelondb-expo-plugin": "^2.3.3",
     "@types/invariant": "^2.2.37",
     "@types/react": "~19.2.2",
