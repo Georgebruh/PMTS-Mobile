@@ -9,7 +9,7 @@ import {
 
 const adapter = new SQLiteAdapter({
   schema,
-  jsi: true, // native JSI path — needs a dev build, not Expo Go
+  jsi: false, // JSI native mods disabled — async bridge is fine for our data volume
   onSetUpError: (error) => {
     console.error('WatermelonDB setup failed:', error)
   },

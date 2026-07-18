@@ -1,4 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(echo '--- ping ---')",
+      "Bash(curl -sS -L https://script.google.com/macros/s/AKfycbypsdOcHOOlv1VKeHnlhYNP3jy0neulTc7PhwglWQbyHViI5VCh9KjJNK9sHuRS_DYI2Q/exec?path=ping)",
+      "Bash(npx clasp *)",
+      "Bash(echo '--- seed ---')",
+      "Bash(curl -sS -L https://script.google.com/macros/s/AKfycbypsdOcHOOlv1VKeHnlhYNP3jy0neulTc7PhwglWQbyHViI5VCh9KjJNK9sHuRS_DYI2Q/exec?path=admin/seed-once -H 'Content-Type: text/plain;charset=utf-8' --data '{\"secret\":\"b6e3730e06885766e849198e51d6182f24019b560281d33a\",\"email\":\"senagan.george@gmail.com\",\"pin\":\"131058\",\"id\":\"0f49c5ab6a28c6e2\",\"user_code\":\"ADM-001\",\"full_name\":\"George Senagan\"}')",
+      "Bash(echo)",
+      "Bash(echo '--- login with new account ---')",
+      "Bash(curl -sS -L https://script.google.com/macros/s/AKfycbypsdOcHOOlv1VKeHnlhYNP3jy0neulTc7PhwglWQbyHViI5VCh9KjJNK9sHuRS_DYI2Q/exec?path=login -H 'Content-Type: text/plain;charset=utf-8' --data '{\"email\":\"senagan.george@gmail.com\",\"pin\":\"131058\"}')",
+      "Bash(curl -sS -L https://script.google.com/macros/s/AKfycbypsdOcHOOlv1VKeHnlhYNP3jy0neulTc7PhwglWQbyHViI5VCh9KjJNK9sHuRS_DYI2Q/exec?path=sync/pull -H 'Content-Type: text/plain;charset=utf-8' --data '{\"token\":\"eyJ1aWQiOiIwZjQ5YzVhYjZhMjhjNmUyIiwiZXhwIjoxNzg2OTMyNDQ5MjI2fQ==.qC16sOfrawuC48d-kyadki0rF0bNH85zGq5p6oKOswU=\",\"last_pulled_at\":null,\"schema_version\":1}')",
+      "Bash(echo '--- seed route \\(must be gone\\) ---')",
+      "Bash(curl -sS -L https://script.google.com/macros/s/AKfycbypsdOcHOOlv1VKeHnlhYNP3jy0neulTc7PhwglWQbyHViI5VCh9KjJNK9sHuRS_DYI2Q/exec?path=admin/seed-once -H 'Content-Type: text/plain;charset=utf-8' --data '{\"secret\":\"b6e3730e06885766e849198e51d6182f24019b560281d33a\"}')",
+      "Bash(openssl rand *)"
+    ]
+  },
   "enabledPlugins": {
     "expo@claude-plugins-official": true
   }

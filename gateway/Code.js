@@ -30,7 +30,13 @@ function doGet(e) {
 }
 
 function route_(e, method) {
-  var path = String((e && e.pathInfo) || '').replace(/^\/+|\/+$/g, '');
+  // Route rides in ?path=... — anonymous requests to /exec/<pathInfo> get
+  // redirected to a Google sign-in wall (pathInfo only resolves for
+  // cookie-authenticated calls), so the app can't use URL path segments.
+  // pathInfo is kept as a fallback for signed-in browser/curl testing.
+  var path = String(
+    (e && e.parameter && e.parameter.path) || (e && e.pathInfo) || '',
+  ).replace(/^\/+|\/+$/g, '');
   try {
     if (method === 'POST' && path === 'login') {
       return json_(handleLogin_(parseBody_(e)));
