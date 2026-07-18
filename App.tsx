@@ -10,16 +10,17 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useSession } from './src/auth/session';
-import { HomeScreen } from './src/screens/HomeScreen';
+import { RootNavigator } from './src/navigation/RootNavigator';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { useSyncLifecycle } from './src/sync/syncManager';
 
 SplashScreen.preventAutoHideAsync();
 
-// Root auth switch (Feature B). Kept as a plain conditional — React Navigation
-// arrives with the tab shell in Feature D. The splash screen covers both font
-// loading and the SecureStore session restore, so cold start lands directly on
-// the right screen with no login flash.
+// Root auth switch (Feature B). Kept as a plain conditional: mounting the
+// navigation tree (Feature D) only while signed in gives each session fresh
+// nav state. The splash screen covers both font loading and the SecureStore
+// session restore, so cold start lands directly on the right screen with no
+// login flash.
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
     Lato_400Regular,
@@ -47,7 +48,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      {status === 'signedIn' ? <HomeScreen /> : <LoginScreen />}
+      {status === 'signedIn' ? <RootNavigator /> : <LoginScreen />}
       <StatusBar style="dark" />
     </SafeAreaProvider>
   );
