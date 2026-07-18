@@ -16,7 +16,9 @@ export class SyncError extends Error {
 }
 
 /**
- * POST ${API_URL}/sync/pull | /sync/push. The token rides in the body — Apps
+ * POST ${API_URL}?path=sync/pull | sync/push. The route is a query param —
+ * Apps Script pathInfo bounces anonymous callers to a Google sign-in page
+ * (see auth/api.ts). The token rides in the body — Apps
  * Script web apps cannot read HTTP request headers. The gateway always
  * answers HTTP 200 (ContentService cannot set status codes); success/failure
  * is carried in the JSON `ok`/`error` body, same contract as /login.
@@ -30,7 +32,7 @@ async function callGateway(
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}/${path}`, {
+    res = await fetch(`${API_URL}?path=${path}`, {
       method: 'POST',
       // text/plain keeps web builds preflight-free (Apps Script can't answer
       // OPTIONS); the gateway parses e.postData.contents as JSON regardless.

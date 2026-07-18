@@ -43,7 +43,10 @@ export class LoginError extends Error {
 }
 
 /**
- * POST ${API_URL}/login — resolves to a token + user or throws LoginError.
+ * POST ${API_URL}?path=login — resolves to a token + user or throws LoginError.
+ * The route is a query param, not a URL path segment: Apps Script pathInfo
+ * only resolves for cookie-authenticated Google requests, so /exec/login
+ * bounces anonymous app traffic to a sign-in page.
  * The gateway always answers HTTP 200 (Apps Script ContentService cannot set
  * status codes); success/failure is carried in the JSON `ok`/`error` body.
  */
@@ -55,7 +58,7 @@ export async function loginRequest(
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}/login`, {
+    res = await fetch(`${API_URL}?path=login`, {
       method: 'POST',
       // text/plain keeps web builds preflight-free (Apps Script can't answer
       // OPTIONS); the gateway parses e.postData.contents as JSON regardless.
