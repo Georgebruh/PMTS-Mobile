@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import type { IconName } from '../components/icons';
 import { Icon } from '../components/Icon';
 import { theme } from '../theme';
+import { Fab } from './Fab';
 import type { RootTabParamList } from './types';
 
 // Geometry from the mockup's .bottom-bar: pill and FAB float 18px from the
@@ -93,6 +94,9 @@ export function BottomBar({ state, descriptors, navigation, insets }: BottomTabB
           );
         })}
       </View>
+
+      {/* After the pill so the open dial's backdrop dims it too. */}
+      <Fab bottom={bottom} />
     </View>
   );
 }
