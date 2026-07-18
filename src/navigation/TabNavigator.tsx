@@ -1,6 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { useRole } from '../auth/session';
+import { BottomBar } from './BottomBar';
 import { AssetsStack, CalendarStack, HomeStack, StaffStack } from './stacks';
 import type { RootTabParamList } from './types';
 
@@ -15,7 +16,10 @@ export function TabNavigator() {
   if (role === null) return null; // unmounts via the root auth switch
 
   return (
-    <Tab.Navigator screenOptions={{ headerShown: false }}>
+    <Tab.Navigator
+      tabBar={(props) => <BottomBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
       <Tab.Screen name="HomeTab" component={HomeStack} options={{ title: 'Home' }} />
       <Tab.Screen name="AssetsTab" component={AssetsStack} options={{ title: 'Assets' }} />
       {role === 2 && (

@@ -59,7 +59,9 @@ export function Screen({ title, dateLine, hasNotifications, children }: Props) {
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingHorizontal: theme.spacing.xl,
-          paddingBottom: 128,
+          // Clears the floating nav pill + FAB (62 high, 20 above the system
+          // inset) with breathing room on edge-to-edge Android.
+          paddingBottom: 128 + insets.bottom,
         }}
         showsVerticalScrollIndicator={false}
       >
