@@ -1,76 +1,117 @@
+import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Pressable, Text } from 'react-native';
+import { useMemo } from 'react';
+import { Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card } from '../components/Card';
-import { Icon } from '../components/Icon';
-import { Screen } from '../components/Screen';
-import { SectionHead } from '../components/SectionHead';
+import { useRole, useSession } from '../auth/session';
+import { DetailScreen } from '../components/DetailScreen';
+import { EmptyState } from '../components/EmptyState';
+import { FilterChips, type ChipItem } from '../components/FilterChips';
+import { WorkOrderCard } from '../components/WorkOrderCard';
 import type { HomeStackParamList } from '../navigation/types';
 import { theme } from '../theme';
-import { useDraftReportCount, useTodayBounds, useWoCount } from '../wo/hooks';
-import { FILTER_TITLES } from '../wo/queries';
+import { chipsForRole } from '../wo/chips';
+import { useTodayBounds, useWoList } from '../wo/hooks';
+import { FILTER_TITLES, type WoListFilterKind } from '../wo/queries';
+import type { WoRecord } from '../wo/types';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'WorkOrderList'>;
 
-// Feature E stub — proves the card → filter param → query pipeline end-to-end
-// before the real list exists: the count shown here uses the same builders as
-// the tapped card, so the two must agree. Feature F replaces this screen's
-// internals; the route, FILTER_TITLES, and woClauses stay as its data source.
+// Feature F — the real Work Order List. One shared screen for both roles,
+// parameterized by the filter the dashboard card (or See-all, or a chip)
+// supplied. Route params are the single source of truth: chips call
+// setParams, so no stack growth and back always returns to Home in one step.
+// Rows arrive pre-sorted in the frozen order from useWoList.
 export function WorkOrderListScreen({ navigation, route }: Props) {
   const { filter } = route.params;
   const bounds = useTodayBounds();
+  const insets = useSafeAreaInsets();
+  const role = useRole();
+  const userId = useSession((s) => s.user?.id ?? '');
 
-  // Hooks stay unconditional; only one of the two counts is displayed. The
-  // myDrafts card counts draft REPORTS, so the stub mirrors that count.
-  const woCount = useWoCount(filter, bounds);
-  const draftCount = useDraftReportCount(filter.reporterId ?? '');
-  const count = filter.kind === 'myDrafts' ? draftCount : woCount;
+  const rows = useWoList(filter, bounds);
 
-  const noun = filter.kind === 'myDrafts' ? 'draft report' : 'work order';
+  // Effective-role chips: an Act-as-L1 flip mid-screen swaps the chip set
+  // live. The arriving filter is kept even if its chip vanished (activeKey
+  // just goes null) — visibility is server-scoped, so nothing leaks.
+  const chips = useMemo(
+    () => (role === null ? [] : chipsForRole(role, userId)),
+    [role, userId],
+  );
+  const chipItems = useMemo<ChipItem<WoListFilterKind>[]>(
+    () => chips.map((c) => ({ key: c.kind, label: c.label })),
+    [chips],
+  );
+  const activeKey = chips.some((c) => c.kind === filter.kind) ? filter.kind : null;
+
+  const selectChip = (kind: WoListFilterKind) => {
+    const chip = chips.find((c) => c.kind === kind);
+    if (chip) navigation.setParams({ filter: chip.filter });
+  };
+
+  const renderItem = ({ item }: { item: WoRecord }) => (
+    <WorkOrderCard
+      wo={item}
+      onPress={() => navigation.navigate('WorkOrderDetail', { woId: item.id })}
+    />
+  );
 
   return (
-    <Screen title={FILTER_TITLES[filter.kind]}>
-      {/* The Screen scaffold has no back affordance — Feature F builds the
-          real one. Hardware back works regardless. */}
-      <Pressable
-        onPress={() => navigation.goBack()}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 4,
-          alignSelf: 'flex-start',
-          marginTop: theme.spacing.md,
-          paddingVertical: 6,
-          opacity: pressed ? 0.6 : 1,
-        })}
-      >
-        <Icon
-          name="chevleft"
-          size={theme.sizes.iconSmall}
-          color={theme.colors.maroon}
-          strokeWidth={2.2}
-        />
-        <Text style={{ fontFamily: theme.fonts.bold, fontSize: 13, color: theme.colors.maroon }}>
-          Back
-        </Text>
-      </Pressable>
+    <DetailScreen
+      title={FILTER_TITLES[filter.kind]}
+      onBack={() => navigation.goBack()}
+      scroll={false}
+    >
+      <View style={{ marginTop: theme.spacing.md }}>
+        <FilterChips chips={chipItems} activeKey={activeKey} onSelect={selectChip} />
+      </View>
 
-      <SectionHead title="Filtered result" count={count} />
-      <Card style={{ padding: theme.spacing.lg, gap: 4 }}>
-        <Text style={theme.text.cardTitle}>
-          {count === undefined
-            ? 'Counting…'
-            : `${count} matching ${noun}${count === 1 ? '' : 's'}`}
+      {/* Nothing renders below the chips until the first emission — a stale
+          or fake-empty list never flashes under a new title. */}
+      {rows !== undefined && (
+        <Text
+          style={[
+            theme.text.micro,
+            {
+              marginTop: theme.spacing.md,
+              marginBottom: 10,
+              marginHorizontal: theme.spacing.xl + 2,
+            },
+          ]}
+        >
+          {rows.length} work order{rows.length === 1 ? '' : 's'} · tier-sorted
         </Text>
-        <Text style={theme.text.caption}>
-          filter: {filter.kind}
-          {filter.assignedTo !== undefined ? ` · assignedTo=${filter.assignedTo}` : ''}
-          {filter.reporterId !== undefined ? ` · reporterId=${filter.reporterId}` : ''}
-        </Text>
-        <Text style={theme.text.caption}>
-          The tier-sorted work order list arrives with Feature F.
-        </Text>
-      </Card>
-    </Screen>
+      )}
+
+      {rows !== undefined &&
+        (rows.length === 0 ? (
+          <View style={{ paddingHorizontal: theme.spacing.xl }}>
+            <EmptyState
+              title="No work orders"
+              caption="Nothing matches this filter right now."
+            />
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlashList
+              data={rows}
+              keyExtractor={(wo) => wo.id}
+              renderItem={renderItem}
+              ItemSeparatorComponent={RowGap}
+              contentContainerStyle={{
+                paddingHorizontal: theme.spacing.xl,
+                // Clears the floating nav pill + FAB, like every scroll body.
+                paddingBottom: 128 + insets.bottom,
+              }}
+              showsVerticalScrollIndicator={false}
+            />
+          </View>
+        ))}
+    </DetailScreen>
   );
+}
+
+function RowGap() {
+  return <View style={{ height: 10 }} />;
 }
