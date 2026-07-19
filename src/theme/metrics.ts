@@ -26,4 +26,5 @@ export const sizes = {
   button: 50, // .btn
   searchField: 44,
   iconButton: 36, // .icon-btn
+  backBtn: 38, // .back-btn (pushed-screen header)
 } as const;
