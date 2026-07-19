@@ -28,7 +28,6 @@ export function StatCard({ label, count, accent = false, onPress }: Props) {
         paddingVertical: 14,
         paddingHorizontal: theme.spacing.lg,
         gap: 2,
-        ...theme.shadows.card,
       })}
     >
       <Text style={{ fontFamily: theme.fonts.bold, fontSize: 28, lineHeight: 34, color: countColor }}>

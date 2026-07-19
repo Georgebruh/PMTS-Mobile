@@ -45,7 +45,6 @@ export function WorkOrderCard({ wo, onPress }: Props) {
             borderWidth: 1,
             borderColor: theme.colors.line,
             borderRadius: theme.radii.xl,
-            ...theme.shadows.card,
           }}
         >
           <StatusTile variant={meta.tile} />

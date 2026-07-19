@@ -18,7 +18,6 @@ export function Card({ children, style }: Props) {
           borderWidth: 1,
           borderColor: theme.colors.line,
           borderRadius: theme.radii.xl,
-          ...theme.shadows.card,
         },
         style,
       ]}
