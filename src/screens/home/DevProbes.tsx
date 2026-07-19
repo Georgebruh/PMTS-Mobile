@@ -1,0 +1,220 @@
+import { Q } from '@nozbe/watermelondb';
+import { Alert, Pressable, Text } from 'react-native';
+
+import { Card } from '../../components/Card';
+import { database } from '../../database/database';
+import { theme } from '../../theme';
+import { todayBounds } from '../../wo/dates';
+import {
+  draftReportClauses,
+  FILTER_TITLES,
+  matchesDraftJs,
+  matchesFilterJs,
+  progressClauses,
+  woClauses,
+  type WoListFilter,
+} from '../../wo/queries';
+import { WO_STATUS } from '../../wo/status';
+import type { ReportRecord, WoRecord } from '../../wo/types';
+
+// Dev-only dashboard harness (mounted behind __DEV__). Probe rule: run in
+// airplane mode and delete before reconnecting — a created-then-destroyed
+// local row never pushes. The marker strings make any leaked row easy to hand
+// clean from the sheet; push is upsert-by-id, so re-pushes can't duplicate.
+const DRAFT_MARKER = 'TEST_DRAFT_E';
+const WO_CODES = ['TEST-E-1', 'TEST-E-2', 'TEST-E-3'];
+
+type Props = {
+  userId: string;
+  role: 1 | 2;
+};
+
+export function DevProbes({ userId, role }: Props) {
+  // Feature I doesn't exist yet, so this simulates its draft write: press once
+  // to create a draft report (Unfinished must bump instantly, no sync), press
+  // again to remove it.
+  const toggleDraft = async () => {
+    const drafts = await database
+      .get('maintenance_reports')
+      .query(Q.where('action_taken', DRAFT_MARKER), Q.where('reporter_user_id', userId))
+      .fetch();
+    if (drafts.length > 0) {
+      await database.write(async () => {
+        for (const draft of drafts) await draft.destroyPermanently();
+      });
+      return;
+    }
+
+    const wos = await database.get('work_orders').query(Q.take(1)).fetch();
+    if (wos.length === 0) {
+      Alert.alert('No work orders yet', 'Seed test WOs first, or sync some in.');
+      return;
+    }
+    const wo: any = wos[0];
+    await database.write(async () => {
+      await database.get('maintenance_reports').create((r: any) => {
+        r.workOrder.set(wo);
+        r.asset.id = wo.asset.id;
+        r.reportCode = ''; // display codes are server-assigned
+        r.actionTaken = DRAFT_MARKER;
+        r.isDraft = true;
+        r.reporterUserId = userId;
+        r.approvalStatus = '';
+      });
+    });
+  };
+
+  // Known fixture: Due Today = 2, Overdue = 1, progress 1/2 = 50%, and the
+  // preview must order T1 → T2 → T3. Press again to delete the fixture.
+  const toggleSeedWos = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES)))
+      .fetch();
+    if (existing.length > 0) {
+      await database.write(async () => {
+        for (const wo of existing) await wo.destroyPermanently();
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      return;
+    }
+    const asset: any = assets[0];
+    const bounds = todayBounds();
+    const rows = [
+      {
+        code: 'TEST-E-1',
+        tier: 1,
+        status: WO_STATUS.IN_PROGRESS,
+        due: new Date(bounds.start - 15 * 60 * 60 * 1000), // yesterday → Overdue
+      },
+      {
+        code: 'TEST-E-2',
+        tier: 2,
+        status: WO_STATUS.ASSIGNED,
+        due: new Date(bounds.start + 9 * 60 * 60 * 1000), // today
+      },
+      {
+        code: 'TEST-E-3',
+        tier: 3,
+        status: WO_STATUS.COMPLETED,
+        due: new Date(bounds.start + 9 * 60 * 60 * 1000), // today, done → progress
+      },
+    ];
+    await database.write(async () => {
+      for (const row of rows) {
+        await database.get('work_orders').create((w: any) => {
+          w.asset.set(asset);
+          w.woCode = row.code;
+          w.tier = row.tier;
+          w.woType = 'PMS';
+          w.status = row.status;
+          w.assignedTo = userId;
+          w.createdBy = userId;
+          w.dueDate = row.due;
+          w.site = asset.site;
+          w.location = asset.location;
+        });
+      }
+    });
+  };
+
+  // The done-when's standing "hand query": for every card of the current
+  // effective role, count via the shared Q-clauses AND via the independent
+  // plain-JS matcher over a full-table fetch. Both must equal the on-screen
+  // number.
+  const dumpCounts = async () => {
+    const bounds = todayBounds();
+    const filters: WoListFilter[] =
+      role === 1
+        ? [
+            { kind: 'today', assignedTo: userId },
+            { kind: 'overdue', assignedTo: userId },
+            { kind: 'open', assignedTo: userId },
+          ]
+        : [
+            { kind: 'today' },
+            { kind: 'unassigned' },
+            { kind: 'assigned' },
+            { kind: 'completed' },
+            { kind: 'pendingApproval' },
+            { kind: 'open' },
+          ];
+
+    const allWos = (await database
+      .get('work_orders')
+      .query()
+      .fetch()) as unknown as WoRecord[];
+
+    const lines: string[] = [];
+    for (const filter of filters) {
+      const sql = await database
+        .get('work_orders')
+        .query(...woClauses(filter, bounds))
+        .fetchCount();
+      const js = allWos.filter((wo) => matchesFilterJs(wo, filter, bounds)).length;
+      lines.push(
+        `${FILTER_TITLES[filter.kind]}: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`,
+      );
+    }
+
+    if (role === 1) {
+      const sqlDrafts = await database
+        .get('maintenance_reports')
+        .query(...draftReportClauses(userId))
+        .fetchCount();
+      const allReports = (await database
+        .get('maintenance_reports')
+        .query()
+        .fetch()) as unknown as ReportRecord[];
+      const jsDrafts = allReports.filter((r) => matchesDraftJs(r, userId)).length;
+      lines.push(
+        `${FILTER_TITLES.myDrafts}: sql=${sqlDrafts} js=${jsDrafts}${sqlDrafts === jsDrafts ? '' : '  ⚠ MISMATCH'}`,
+      );
+
+      const { denom, numer } = progressClauses(userId, bounds);
+      const done = await database.get('work_orders').query(...numer).fetchCount();
+      const total = await database.get('work_orders').query(...denom).fetchCount();
+      lines.push(`Progress: done=${done} / total=${total}`);
+    }
+
+    console.log(`[DevProbes] count dump\n${lines.join('\n')}`);
+    Alert.alert('Dashboard counts (sql vs js)', lines.join('\n'));
+  };
+
+  return (
+    <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
+      <Text style={theme.text.cardTitle}>DEV · Dashboard probes</Text>
+      <Text style={theme.text.caption}>
+        Airplane mode on → probe → verify → delete → airplane mode off. Deleted-before-sync rows
+        never reach the sheet.
+      </Text>
+      <DevButton label="Toggle draft report (Unfinished ±1, no sync)" onPress={toggleDraft} />
+      <DevButton label="Toggle 3 seed WOs (Today 2 · Overdue 1 · 50%)" onPress={toggleSeedWos} />
+      <DevButton label="Dump dashboard counts (sql vs js)" onPress={dumpCounts} />
+    </Card>
+  );
+}
+
+function DevButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        alignSelf: 'flex-start',
+        borderRadius: theme.radii.md,
+        borderWidth: 1,
+        borderColor: theme.colors.line,
+        backgroundColor: pressed ? theme.colors.bg : theme.colors.white,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: 8,
+      })}
+    >
+      <Text style={[theme.text.caption, { color: theme.colors.ink }]}>{label}</Text>
+    </Pressable>
+  );
+}

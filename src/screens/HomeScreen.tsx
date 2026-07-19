@@ -12,6 +12,7 @@ import { flushAndSignOut, useSyncStatus } from '../sync/syncManager';
 import { theme } from '../theme';
 import { DashboardL1 } from './home/DashboardL1';
 import { DashboardL2 } from './home/DashboardL2';
+import { DevProbes } from './home/DevProbes';
 import { WoPreviewSection } from './home/WoPreviewSection';
 
 const ROLE_TITLES = {
@@ -95,6 +96,7 @@ export function HomeScreen() {
 
       <SectionHead title="Sync" />
       <SyncStatusCard userId={user.id} userEmail={user.email} />
+      {__DEV__ && <DevProbes userId={user.id} role={role} />}
 
       <Pressable
         onPress={async () => {
