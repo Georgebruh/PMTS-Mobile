@@ -46,7 +46,6 @@ export function BottomBar({ state, descriptors, navigation, insets }: BottomTabB
           alignItems: 'center',
           justifyContent: 'space-around',
           paddingHorizontal: 12,
-          ...theme.shadows.floating,
         }}
       >
         {state.routes.map((route, index) => {
