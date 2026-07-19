@@ -6,9 +6,9 @@ import { useObservable } from '../hooks/useObservable';
 import { todayBounds, type DayBounds } from './dates';
 import {
   draftReportClauses,
-  previewCompare,
   progressClauses,
   woClauses,
+  woCompare,
   type WoListFilter,
 } from './queries';
 import { asSubscribable, type WoRecord } from './types';
@@ -107,7 +107,28 @@ export function useWoPreview(assignedTo?: string): WoRecord[] | undefined {
     [assignedTo],
   );
   return useMemo(
-    () => (rows === undefined ? undefined : [...rows].sort(previewCompare).slice(0, 5)),
+    () => (rows === undefined ? undefined : [...rows].sort(woCompare).slice(0, 5)),
     [rows],
   );
+}
+
+/**
+ * The Work Order List's rows: everything matching `filter`, in the frozen
+ * order (tier 1→2→3, due date nulls-last, code). undefined until the first
+ * emission — and again whenever the filter changes, so a stale list never
+ * shows under a new title. The screen's count is rows.length: the list and
+ * its header number read the same array and cannot disagree.
+ */
+export function useWoList(filter: WoListFilter, bounds: DayBounds): WoRecord[] | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<WoRecord[]>(
+        database
+          .get('work_orders')
+          .query(...woClauses(filter, bounds))
+          .observe(),
+      ),
+    [filter.kind, filter.assignedTo, filter.reporterId, bounds.start],
+  );
+  return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
 }
