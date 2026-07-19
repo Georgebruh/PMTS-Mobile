@@ -16,9 +16,8 @@ const ROLE_TITLES = {
   2: 'Level 2 — Asset Manager',
 } as const;
 
-// Feature B placeholder home: proves the auth switch landed on the right role
-// and hosts the L2→L1 toggle + logout. Feature D replaces this with the real
-// role-aware tab shell; Feature E fills in the dashboard.
+// Home tab's stack screen (re-homed by Feature D's tab shell): hosts the
+// L2→L1 toggle + logout. Feature E fills in the real dashboard.
 export function HomeScreen() {
   const user = useSession((s) => s.user);
   const actAsL1 = useSession((s) => s.actAsL1);

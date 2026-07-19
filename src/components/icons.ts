@@ -55,6 +55,22 @@ export const glyphs = {
     },
   ],
   pencil: [{ type: 'path', d: 'M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z' }],
+  // Feature D: the FAB's Add Asset action — no equivalent in the mockup.
+  box: [
+    {
+      type: 'path',
+      d: 'M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z',
+    },
+    { type: 'path', d: 'M3.3 7l8.7 5 8.7-5' },
+    { type: 'path', d: 'M12 22V12' },
+  ],
+  // Feature D: Staff tab — no people glyph exists in the mockup's symbol set.
+  users: [
+    { type: 'path', d: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2' },
+    { type: 'circle', cx: 9, cy: 8, r: 3.5 },
+    { type: 'path', d: 'M21 21v-2a4 4 0 0 0-3-3.87' },
+    { type: 'path', d: 'M16 4.6a3.5 3.5 0 0 1 0 6.8' },
+  ],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof glyphs;
