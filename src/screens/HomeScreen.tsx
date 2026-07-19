@@ -10,14 +10,19 @@ import { Screen } from '../components/Screen';
 import { database } from '../database/database';
 import { flushAndSignOut, useSyncStatus } from '../sync/syncManager';
 import { theme } from '../theme';
+import { DashboardL1 } from './home/DashboardL1';
+import { DashboardL2 } from './home/DashboardL2';
+import { DevProbes } from './home/DevProbes';
+import { WoPreviewSection } from './home/WoPreviewSection';
 
 const ROLE_TITLES = {
   1: 'Level 1 — Maintenance Staff',
   2: 'Level 2 — Asset Manager',
 } as const;
 
-// Home tab's stack screen (re-homed by Feature D's tab shell): hosts the
-// L2→L1 toggle + logout. Feature E fills in the real dashboard.
+// Home tab's stack screen: the Feature E live dashboard (role-branched) plus
+// the session chrome from Feature B (L2→L1 toggle, logout) and Feature C's
+// sync status card.
 export function HomeScreen() {
   const user = useSession((s) => s.user);
   const actAsL1 = useSession((s) => s.actAsL1);
@@ -35,24 +40,11 @@ export function HomeScreen() {
 
   return (
     <Screen title="Home" dateLine={dateLine}>
-      <SectionHead title="Signed in" />
-      <Card style={{ padding: theme.spacing.lg, gap: 6 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
-          <Text style={theme.text.cardTitle}>{user.full_name || user.email}</Text>
-          {user.is_lead && <Pill variant="type" label="LEAD" />}
-        </View>
-        <Text style={theme.text.caption}>{user.email}</Text>
-        <Text style={theme.text.caption}>
-          Area: {user.assigned_area || '—'}
-          {user.assigned_locations ? ` · ${user.assigned_locations}` : ''}
-        </Text>
-        <View style={{ marginTop: 6 }}>
-          <Pill
-            variant={role === 2 ? 'repair' : 'done'}
-            label={ROLE_TITLES[role]}
-          />
-        </View>
-      </Card>
+      {/* Separate components per role: the Act-as-L1 flip unmounts one tree
+          and mounts the other, so every observable re-subscribes under the
+          new scope by construction. */}
+      {role === 1 ? <DashboardL1 userId={user.id} /> : <DashboardL2 />}
+      <WoPreviewSection assignedTo={role === 1 ? user.id : undefined} />
 
       {user.role_level === 2 && (
         <>
@@ -83,20 +75,28 @@ export function HomeScreen() {
         </>
       )}
 
-      <SectionHead title="Dashboard" />
-      <Card style={{ padding: theme.spacing.lg, gap: 4 }}>
-        <Text style={theme.text.cardTitle}>
-          {role === 1 ? 'Your work orders land here' : 'Your team overview lands here'}
-        </Text>
+      <SectionHead title="Signed in" />
+      <Card style={{ padding: theme.spacing.lg, gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm }}>
+          <Text style={theme.text.cardTitle}>{user.full_name || user.email}</Text>
+          {user.is_lead && <Pill variant="type" label="LEAD" />}
+        </View>
+        <Text style={theme.text.caption}>{user.email}</Text>
         <Text style={theme.text.caption}>
-          {role === 1
-            ? "Today's work orders, overdue, and unfinished reports arrive with Feature E."
-            : 'Unassigned, assigned, completed, and pending-approval counts arrive with Feature E.'}
+          Area: {user.assigned_area || '—'}
+          {user.assigned_locations ? ` · ${user.assigned_locations}` : ''}
         </Text>
+        <View style={{ marginTop: 6 }}>
+          <Pill
+            variant={role === 2 ? 'repair' : 'done'}
+            label={ROLE_TITLES[role]}
+          />
+        </View>
       </Card>
 
       <SectionHead title="Sync" />
       <SyncStatusCard userId={user.id} userEmail={user.email} />
+      {__DEV__ && <DevProbes userId={user.id} role={role} />}
 
       <Pressable
         onPress={async () => {
@@ -141,10 +141,9 @@ const PHASE_LABELS = {
   error: 'Sync failed — retrying',
 } as const;
 
-// Feature C status readout + dev-only write probe. The probe is how the
-// airplane-mode gate is exercised before Features E–J add real write screens;
-// it appends a TEST_SYNC asset_history event (append-only, safe to clean from
-// the sheet afterwards). Both retire when the real dashboard lands (Feature E).
+// Feature C status readout + dev-only write probe. The probe stays until
+// Feature C's phase-7 device gate passes (it appends a TEST_SYNC asset_history
+// event, append-only and safe to clean from the sheet); retire it then.
 function SyncStatusCard({ userId, userEmail }: { userId: string; userEmail: string }) {
   const phase = useSyncStatus((s) => s.phase);
   const pending = useSyncStatus((s) => s.pending);

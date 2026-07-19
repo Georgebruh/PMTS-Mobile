@@ -135,7 +135,6 @@ export function Fab({ bottom }: { bottom: number }) {
             backgroundColor: pressed ? theme.colors.redPressed : theme.colors.red,
             alignItems: 'center',
             justifyContent: 'center',
-            ...theme.shadows.floating,
           })}
         >
           <Animated.View
@@ -182,7 +181,6 @@ function ActionRow({
           borderRadius: theme.radii.pill,
           paddingHorizontal: theme.spacing.lg,
           paddingVertical: 8,
-          ...theme.shadows.card,
         }}
       >
         <Text style={theme.text.cardTitle}>{label}</Text>
@@ -195,7 +193,6 @@ function ActionRow({
           backgroundColor: theme.colors.red,
           alignItems: 'center',
           justifyContent: 'center',
-          ...theme.shadows.floating,
         }}
       >
         <Icon name={icon} size={22} color={theme.colors.white} />

@@ -29,11 +29,7 @@ export const database = new Database({
   ],
 })
 
-/**
- * Feature C wipe-on-user-switch: drops every table AND WatermelonDB's own
- * lastPulledAt, so the next sync is a clean full pull. Only ever call before
- * the new user's first local write (see session.signIn).
- */
+
 export async function wipeLocalDatabase() {
   await database.write(async () => {
     await database.unsafeResetDatabase()

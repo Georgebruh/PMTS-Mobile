@@ -4,6 +4,7 @@ import { AssetListScreen } from '../screens/AssetListScreen';
 import { CalendarScreen } from '../screens/CalendarScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { StaffScreen } from '../screens/StaffScreen';
+import { WorkOrderListScreen } from '../screens/WorkOrderListScreen';
 import type {
   AssetsStackParamList,
   CalendarStackParamList,
@@ -21,6 +22,7 @@ export function HomeStack() {
   return (
     <HomeStackNav.Navigator screenOptions={STACK_OPTIONS}>
       <HomeStackNav.Screen name="HomeMain" component={HomeScreen} />
+      <HomeStackNav.Screen name="WorkOrderList" component={WorkOrderListScreen} />
     </HomeStackNav.Navigator>
   );
 }
