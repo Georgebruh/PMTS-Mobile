@@ -15,6 +15,7 @@ export const colors = {
   white: '#FFFFFF',
   notifDot: '#F5A623',
   syncGreen: '#2E9E4F', // .ic.green (cloud-check when synced)
+  barTrack: '#EDE2E0', // .bar (progress track; fill gradient ends at #B4181A)
 } as const;
 
 // Tag/pill pairs (background + text), from the mockup's tag tokens.
