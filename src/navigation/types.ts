@@ -1,10 +1,16 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
-// Per-tab stack param lists. Feature D ships one route per stack; later
-// features append their screens here (E/F/H/I → Home, G → Assets,
+import type { WoListFilter } from '../wo/queries';
+
+// Per-tab stack param lists. Feature D shipped one route per stack; later
+// features append their screens here (F/H/I → Home, G → Assets,
 // K → Calendar, L → Staff).
 export type HomeStackParamList = {
   HomeMain: undefined;
+  // Feature E's typed entry into the Work Order List. The stub screen ships
+  // with E; Feature F replaces the screen, not the route — the filter param
+  // stays a plain serializable object.
+  WorkOrderList: { filter: WoListFilter };
 };
 
 export type AssetsStackParamList = {
