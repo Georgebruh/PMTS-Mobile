@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../theme';
 import { Icon } from './Icon';
 import { OfflineBanner } from './OfflineBanner';
+import { ProfileButton } from './ProfileButton';
 import { SyncIndicator } from './SyncIndicator';
 
 type Props = {
@@ -40,8 +41,12 @@ export function Screen({ title, dateLine, hasNotifications, scroll = true, child
           paddingBottom: 6,
         }}
       >
-        <Text style={theme.text.screenTitle}>{title}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <Text numberOfLines={1} style={[theme.text.screenTitle, { flexShrink: 1 }]}>
+          {title}
+        </Text>
+        {/* Three items is the ceiling for this header — the gap tightens from
+            the mockup's 14 to keep long titles from truncating. */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <HeaderIconButton>
             <SyncIndicator />
           </HeaderIconButton>
@@ -49,6 +54,7 @@ export function Screen({ title, dateLine, hasNotifications, scroll = true, child
             <Icon name="bell" />
             {hasNotifications && <NotificationDot />}
           </HeaderIconButton>
+          <ProfileButton />
         </View>
       </View>
 

@@ -5,6 +5,7 @@ export const radii = {
   md: 12, // .status-tile, .search-field, .filter-btn
   lg: 14, // .btn
   xl: 16, // .asset-card, .info-card, .nav-btn
+  sheet: 24, // bottom-sheet top corners (profile menu)
   pill: 999,
 } as const;
 
