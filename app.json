@@ -29,7 +29,15 @@
       ],
       "expo-font",
       "expo-splash-screen",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PMTS needs your photos so you can attach equipment images to a maintenance report.",
+          "cameraPermission": "PMTS needs the camera so you can photograph equipment for a maintenance report.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/favicon.png"
