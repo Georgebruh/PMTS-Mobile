@@ -1,3 +1,4 @@
+import { Q } from '@nozbe/watermelondb';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
 
@@ -11,7 +12,7 @@ import {
   woCompare,
   type WoListFilter,
 } from './queries';
-import { asSubscribable, type WoRecord } from './types';
+import { asSubscribable, type CrewRecord, type WoRecord } from './types';
 
 // Today's [start, end) window, recomputed whenever the app returns to the
 // foreground so a day rollover re-baselines every dashboard query. Accepted
@@ -131,4 +132,51 @@ export function useWoList(filter: WoListFilter, bounds: DayBounds): WoRecord[] |
     [filter.kind, filter.assignedTo, filter.reporterId, bounds.start],
   );
   return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
+}
+
+/**
+ * One live work order for the detail screen (Feature H). undefined until the
+ * first emission, null when the row is gone.
+ *
+ * query().observe() rather than findAndObserve() — a work order removed by a
+ * sync while the detail is open must render the empty state, not throw. It
+ * also keeps emitting after Start/Complete, so the buttons re-evaluate their
+ * guards against the row the write just produced.
+ */
+export function useWo(woId: string): WoRecord | null | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<WoRecord[]>(
+        database.get('work_orders').query(Q.where('id', woId)).observe(),
+      ),
+    [woId],
+  );
+  if (rows === undefined) return undefined;
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * This work order's crew, oldest first — the order they were added is the
+ * order they read best in. undefined until the first emission.
+ */
+export function useCrew(woId: string): CrewRecord[] | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<CrewRecord[]>(
+        database
+          .get('work_order_crew')
+          .query(Q.where('work_order_id', woId))
+          .observe(),
+      ),
+    [woId],
+  );
+  return useMemo(() => (rows === undefined ? undefined : [...rows].sort(crewCompare)), [rows]);
+}
+
+/** Oldest first, id as a stable tie-break for rows created in the same ms. */
+function crewCompare(a: CrewRecord, b: CrewRecord): number {
+  const aAt = a.createdAt ? a.createdAt.getTime() : 0;
+  const bAt = b.createdAt ? b.createdAt.getTime() : 0;
+  if (aAt !== bAt) return aAt - bAt;
+  return a.id.localeCompare(b.id);
 }
