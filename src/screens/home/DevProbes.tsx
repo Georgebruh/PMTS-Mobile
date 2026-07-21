@@ -14,6 +14,9 @@ import { useSession } from '../../auth/session';
 import { Card } from '../../components/Card';
 import { database } from '../../database/database';
 import { pendingChanges } from '../../database/syncEngine';
+import type { UploadRecord } from '../../report/types';
+import { countByState } from '../../report/uploads';
+import { deriveUrls } from '../../report/urls';
 import { theme } from '../../theme';
 import { woActions } from '../../wo/actions';
 import { chipsForRole } from '../../wo/chips';
@@ -52,6 +55,9 @@ const WO_CODES_F = [
 ];
 /** Fake assignee id — matches no real user, exercising the L1 me-scope. */
 const OTHER_USER = 'TEST-F-OTHER';
+
+// Feature I: one work order in the only state that accepts a report.
+const WO_CODES_I = ['TEST-I-1'];
 
 // Feature G fixture: mirrors the Node harness's asset set exactly, but built
 // from the SIGNED-IN user's own area/locations so the lock is exercised
@@ -606,6 +612,161 @@ export function DevProbes({ userId, role }: Props) {
     Alert.alert('Push queue (WatermelonDB _status)', lines.join('\n'));
   };
 
+  // ---------- Feature I ----------
+
+  // One COMPLETED work order assigned to me: the single state from which a
+  // report may be filed. Press again to remove it AND everything it spawned,
+  // so a probe run never leaves a report or a queued file behind.
+  const toggleSeedWoI = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_I)))
+      .fetch();
+
+    if (existing.length > 0) {
+      await database.write(async () => {
+        for (const wo of existing) {
+          const reports = await database
+            .get('maintenance_reports')
+            .query(Q.where('work_order_id', wo.id))
+            .fetch();
+          for (const report of reports) {
+            for (const p of await database
+              .get('report_parameters')
+              .query(Q.where('report_id', report.id))
+              .fetch()) {
+              await p.destroyPermanently();
+            }
+            for (const u of await database
+              .get('pending_uploads')
+              .query(Q.where('report_id', report.id))
+              .fetch()) {
+              await u.destroyPermanently();
+            }
+            await report.destroyPermanently();
+          }
+          await wo.destroyPermanently();
+        }
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the G fixture first, or sync some in.');
+      return;
+    }
+    const asset: any = assets[0];
+    const now = Date.now();
+
+    await database.write(async () => {
+      await database.get('work_orders').create((w: any) => {
+        w.woCode = WO_CODES_I[0];
+        w.asset.set(asset);
+        w.tier = asset.tier ?? 1;
+        w.woType = WO_TYPE.PMS;
+        w.status = WO_STATUS.COMPLETED; // the only status that accepts a report
+        w.assignedTo = userId;
+        w.createdBy = userId;
+        w.dueDate = new Date(now);
+        w.startedAt = new Date(now - 2 * 60 * 60 * 1000);
+        w.endedAt = new Date(now - 30 * 60 * 1000);
+        w.site = asset.site;
+        w.location = asset.location;
+      });
+    });
+  };
+
+  /**
+   * What a push would actually carry. This is the on-device proof of the
+   * drafts-never-sync decision: every number in the "withheld" block must stay
+   * withheld until the report is submitted, and the moment it IS submitted the
+   * same rows must move to the "will push" block — parameters included, which
+   * is what the touch in submitReport exists to guarantee.
+   */
+  const dumpPushPreview = async () => {
+    const reports = await database.get('maintenance_reports').query().fetch();
+    const drafts = reports.filter((r: any) => r.isDraft === true);
+    const submitted = reports.filter((r: any) => r.isDraft !== true);
+    const draftIds = new Set(drafts.map((r: any) => r.id));
+
+    const params = await database.get('report_parameters').query().fetch();
+    const heldParams = params.filter((p: any) => draftIds.has(p.report.id));
+    const uploads = await database.get('pending_uploads').query().fetch();
+
+    const statusOf = (rows: any[]) => {
+      const tally: Record<string, number> = {};
+      for (const r of rows) {
+        const s = r._raw._status as string;
+        tally[s] = (tally[s] ?? 0) + 1;
+      }
+      return Object.keys(tally).sort().map((k) => `${k}=${tally[k]}`).join(' ') || '(none)';
+    };
+
+    const lines = [
+      'WITHHELD (local only):',
+      `  draft reports: ${drafts.length}  [${statusOf(drafts)}]`,
+      `  their params:  ${heldParams.length}  [${statusOf(heldParams)}]`,
+      `  uploads:       ${uploads.length}  [${statusOf(uploads)}]`,
+      '',
+      'WILL PUSH:',
+      `  submitted reports: ${submitted.length}  [${statusOf(submitted)}]`,
+      `  their params:      ${params.length - heldParams.length}  [${statusOf(
+        params.filter((p: any) => !draftIds.has(p.report.id)),
+      )}]`,
+      '',
+      'NB _status=synced on a WITHHELD row is expected — WatermelonDB marks',
+      'stripped rows synced even though nothing was sent. That is exactly why',
+      'submitReport touches every param on the way out.',
+    ];
+
+    console.log(`[DevProbes] push preview\n${lines.join('\n')}`);
+    Alert.alert('Push preview', lines.join('\n'));
+  };
+
+  /** The upload queue, and the URL columns it currently derives. */
+  const dumpUploads = async () => {
+    const uploads = (await database
+      .get('pending_uploads')
+      .query()
+      .fetch()) as unknown as UploadRecord[];
+
+    if (uploads.length === 0) {
+      Alert.alert('Upload queue', 'Empty.');
+      return;
+    }
+
+    const counts = countByState(uploads);
+    const byReport = new Map<string, UploadRecord[]>();
+    for (const u of uploads) {
+      byReport.set(u.reportId, [...(byReport.get(u.reportId) ?? []), u]);
+    }
+
+    const lines = [`pending=${counts.pending} uploaded=${counts.uploaded} failed=${counts.failed}`, ''];
+    for (const [reportId, rows] of byReport) {
+      const derived = deriveUrls(rows);
+      lines.push(`report ${reportId.slice(0, 8)}…`);
+      for (const r of rows) {
+        lines.push(
+          `  ${r.kind} #${r.sortOrder} ${r.state} attempts=${r.attempts}` +
+            (r.lastError ? ` err="${r.lastError}"` : ''),
+        );
+      }
+      lines.push(`  → photo_urls: ${derived.photoUrls || '(empty)'}`);
+      lines.push(`  → signature_url: ${derived.signatureUrl ?? '(none)'}`);
+      // The gap #6 assertion, checked against live data rather than a fixture.
+      const leak = [derived.photoUrls, derived.signatureUrl ?? '']
+        .join(';')
+        .split(';')
+        .filter((v) => v.trim() !== '' && !/^https?:\/\//i.test(v));
+      lines.push(leak.length > 0 ? `  ⚠️ LOCAL URI LEAK: ${leak.join(', ')}` : '  ✓ no local URIs');
+      lines.push('');
+    }
+
+    console.log(`[DevProbes] uploads\n${lines.join('\n')}`);
+    Alert.alert('Upload queue', lines.join('\n'));
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -628,6 +789,12 @@ export function DevProbes({ userId, role }: Props) {
       />
       <DevButton label="Dump H action guards (vs on-screen buttons)" onPress={dumpActions} />
       <DevButton label="Dump push queue (_status per table)" onPress={dumpPushQueue} />
+      <DevButton
+        label="Toggle I-fixture WO (COMPLETED · mine · ready to report)"
+        onPress={toggleSeedWoI}
+      />
+      <DevButton label="Dump push preview (what drafts withhold)" onPress={dumpPushPreview} />
+      <DevButton label="Dump upload queue + derived URLs" onPress={dumpUploads} />
     </Card>
   );
 }
