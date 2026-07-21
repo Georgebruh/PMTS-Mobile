@@ -44,8 +44,27 @@ export type RootTabParamList = {
   StaffTab: NavigatorScreenParams<StaffStackParamList>;
 };
 
+/**
+ * The stack ABOVE the tabs (Feature I).
+ *
+ * The maintenance report has to live here rather than in the Home stack, and
+ * not for tidiness: `BottomBar` is a StyleSheet.absoluteFill layer rendered by
+ * the tab navigator, so by design it floats over every screen pushed inside a
+ * tab. A report modal pushed into HomeStack would wear the red nav pill and
+ * the FAB on top of it. Presenting above the tab navigator is what actually
+ * hides them.
+ *
+ * It also settles a duplication problem: WorkOrderDetail is registered in BOTH
+ * the Home and Assets stacks, so a per-stack modal would need registering
+ * twice and could be reached with two different navigation states.
+ */
+export type RootStackParamList = {
+  Tabs: NavigatorScreenParams<RootTabParamList>;
+  MaintenanceReport: { reportId: string };
+};
+
 declare global {
   namespace ReactNavigation {
-    interface RootParamList extends RootTabParamList {}
+    interface RootParamList extends RootStackParamList {}
   }
 }
