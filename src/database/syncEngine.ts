@@ -1,6 +1,8 @@
+import { Q } from '@nozbe/watermelondb';
 import { hasUnsyncedChanges, synchronize } from '@nozbe/watermelondb/sync';
 
 import { API_URL } from '../config';
+import { stripLocalOnlyChanges, type ChangeSet } from '../report/push';
 import { database } from './database';
 
 export type SyncErrorCode = 'unconfigured' | 'offline' | 'invalid_token' | 'server_error';
@@ -83,7 +85,27 @@ export async function sync(getToken: () => string | null): Promise<void> {
     },
 
     pushChanges: async ({ changes, lastPulledAt }) => {
-      await callGateway('sync/push', token, { last_pulled_at: lastPulledAt, changes });
+      // Feature I: drafts and the upload queue never leave the device. Read the
+      // draft ids from the database rather than from `changes` — a parameter
+      // can belong to a draft whose own row is unchanged, and so absent here.
+      const drafts = await database
+        .get('maintenance_reports')
+        .query(Q.where('is_draft', true))
+        .fetch();
+      const draftIds = new Set(drafts.map((r) => r.id));
+
+      const outgoing = stripLocalOnlyChanges(changes as unknown as ChangeSet, draftIds);
+
+      // Everything in this batch was local-only: there is nothing to say, and
+      // an empty round-trip to Apps Script is pure latency. Returning early is
+      // safe — WatermelonDB's post-push bookkeeping does not depend on the
+      // request having happened.
+      if (Object.keys(outgoing).length === 0) return;
+
+      await callGateway('sync/push', token, {
+        last_pulled_at: lastPulledAt,
+        changes: outgoing,
+      });
     },
 
     sendCreatedAsUpdated: true, // simpler server: created rows are upserts too
