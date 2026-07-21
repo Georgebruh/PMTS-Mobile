@@ -1,6 +1,16 @@
 import { Q } from '@nozbe/watermelondb';
 import { Alert, Pressable, Text } from 'react-native';
 
+import { areaLockFor, assetLockClauses, matchesLockJs, parseList } from '../../asset/lock';
+import {
+  activeAssetClause,
+  assetCompare,
+  assetFilterClauses,
+  distinctValues,
+  matchesAssetFilterJs,
+} from '../../asset/queries';
+import type { AssetRecord } from '../../asset/types';
+import { useSession } from '../../auth/session';
 import { Card } from '../../components/Card';
 import { database } from '../../database/database';
 import { theme } from '../../theme';
@@ -41,12 +51,20 @@ const WO_CODES_F = [
 /** Fake assignee id — matches no real user, exercising the L1 me-scope. */
 const OTHER_USER = 'TEST-F-OTHER';
 
+// Feature G fixture: mirrors the Node harness's asset set exactly, but built
+// from the SIGNED-IN user's own area/locations so the lock is exercised
+// against real values. Two rows are deliberately out of scope.
+const ASSET_CODES_G = ['TEST-G-1', 'TEST-G-2', 'TEST-G-3', 'TEST-G-4', 'TEST-G-5'];
+const OUT_AREA = 'ZZ-OUT-OF-AREA';
+const OUT_LOC = 'ZZ-OUT-OF-LOCATION';
+
 type Props = {
   userId: string;
   role: 1 | 2;
 };
 
 export function DevProbes({ userId, role }: Props) {
+  const user = useSession((s) => s.user);
   // Feature I doesn't exist yet, so this simulates its draft write: press once
   // to create a draft report (Unfinished must bump instantly, no sync), press
   // again to remove it.
@@ -202,6 +220,175 @@ export function DevProbes({ userId, role }: Props) {
     });
   };
 
+  // Feature G fixture. Expected with ONLY this fixture seeded —
+  // as L1 (area + location lock): 3 assets, order G-1 → G-5 → G-2.
+  // as L2 (area lock only):       4 assets, order G-1 → G-5 → G-3 → G-2.
+  // TEST-G-4 is out of area and must NEVER appear for either role.
+  // G-1 also carries 3 history events, a past + future PMS row, and one open
+  // WO assigned to me (the detail's "View Work Order" jump).
+  const toggleSeedAssetsG = async () => {
+    const existing = await database
+      .get('assets')
+      .query(Q.where('asset_code', Q.oneOf(ASSET_CODES_G)))
+      .fetch();
+
+    if (existing.length > 0) {
+      const ids = existing.map((a) => a.id);
+      const [history, schedules, wos] = await Promise.all([
+        database.get('asset_history').query(Q.where('asset_id', Q.oneOf(ids))).fetch(),
+        database.get('pms_schedule').query(Q.where('asset_id', Q.oneOf(ids))).fetch(),
+        database.get('work_orders').query(Q.where('asset_id', Q.oneOf(ids))).fetch(),
+      ]);
+      await database.write(async () => {
+        // Children first — nothing may outlive the asset it hangs off.
+        for (const row of [...history, ...schedules, ...wos, ...existing]) {
+          await row.destroyPermanently();
+        }
+      });
+      return;
+    }
+
+    const area = parseList(user?.assigned_area)[0] ?? 'AREA-1';
+    const location = parseList(user?.assigned_locations)[0] ?? 'LOC-1';
+    const rows = [
+      { code: 'TEST-G-1', name: 'Alpha Pump', tier: 1, site: area, location, color: 'green', type: 'Land Development', health: 92 },
+      { code: 'TEST-G-2', name: 'Bravo Valve', tier: 2, site: area, location, color: 'red', type: 'Land Development', health: null },
+      { code: 'TEST-G-3', name: 'Charlie Panel', tier: 1, site: area, location: OUT_LOC, color: 'orange', type: 'Electrical', health: null },
+      { code: 'TEST-G-4', name: 'Delta Fence', tier: 3, site: OUT_AREA, location: OUT_LOC, color: 'black', type: 'Electrical', health: null },
+      // Same tier AND name as G-1 — proves the asset-code tie-break.
+      { code: 'TEST-G-5', name: 'Alpha Pump', tier: 1, site: area, location, color: 'green', type: 'Land Development', health: null },
+    ];
+
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+
+    await database.write(async () => {
+      const created: any[] = [];
+      for (const row of rows) {
+        const asset = await database.get('assets').create((a: any) => {
+          a.assetCode = row.code;
+          a.equipmentName = row.name;
+          a.equipmentNo = row.code;
+          a.tier = row.tier;
+          a.site = row.site;
+          a.location = row.location;
+          a.code = row.code;
+          a.assetType = row.type;
+          a.specs = row.health !== null ? '415V · 30kW' : null;
+          a.healthPct = row.health;
+          a.currentStatusColor = row.color;
+          a.inChargeEmail = user?.email ?? '';
+          a.active = true;
+        });
+        created.push(asset);
+      }
+
+      const g1 = created[0];
+      // Seeded out of order so the newest-first timeline sort is non-trivial.
+      const events = [
+        { type: 'STATUS_CHANGE', color: 'orange', at: now - 2 * DAY, notes: 'Vibration above threshold' },
+        { type: 'CREATED', color: 'green', at: now - 30 * DAY, notes: 'Commissioned' },
+        { type: 'WO_COMPLETED', color: 'green', at: now - 1 * DAY, notes: 'Bearing replaced' },
+      ];
+      for (const event of events) {
+        await database.get('asset_history').create((h: any) => {
+          h.asset.set(g1);
+          h.historyCode = ''; // display codes are server-assigned
+          h.eventType = event.type;
+          h.statusColor = event.color;
+          h.actor = userId;
+          h.notes = event.notes;
+          h.eventAt = new Date(event.at);
+        });
+      }
+
+      // One past + one future row → Last Inspection / Next Inspection.
+      for (const due of [now - 200 * DAY, now + 10 * DAY]) {
+        await database.get('pms_schedule').create((p: any) => {
+          p.asset.set(g1);
+          p.scheduleCode = '';
+          p.weekNo = 1;
+          p.dueDate = new Date(due);
+          p.frequencyType = 'A';
+          p.generated = false;
+        });
+      }
+
+      await database.get('work_orders').create((w: any) => {
+        w.asset.set(g1);
+        w.woCode = 'TEST-G-WO';
+        w.tier = 1;
+        w.woType = 'PMS';
+        w.status = WO_STATUS.ASSIGNED;
+        w.assignedTo = userId;
+        w.createdBy = userId;
+        w.dueDate = new Date(now);
+        w.site = g1.site;
+        w.location = g1.location;
+      });
+    });
+  };
+
+  // Feature G's standing hand query: the lock and every reachable filter
+  // counted through the shared Q-clauses AND through the independent plain-JS
+  // matchers, plus the exact row order the Asset List must display.
+  const dumpAssetCounts = async () => {
+    const lock = areaLockFor({
+      assigned_area: user?.assigned_area ?? '',
+      assigned_locations: user?.assigned_locations ?? '',
+    });
+    const lockClauses = assetLockClauses(role, lock);
+
+    const all = (await database.get('assets').query().fetch()) as unknown as AssetRecord[];
+    const visible = (await database
+      .get('assets')
+      .query(activeAssetClause(), ...lockClauses)
+      .fetch()) as unknown as AssetRecord[];
+
+    const sqlLock = visible.length;
+    const jsLock = all.filter((a) => a.active && matchesLockJs(a, role, lock)).length;
+
+    const lines: string[] = [
+      `Role: L${role} (${role === 1 ? 'area + location' : 'area only'})`,
+      `areas=[${lock.areas.join(', ')}] locations=[${lock.locations.join(', ')}]`,
+      `Lock: sql=${sqlLock} js=${jsLock}${sqlLock === jsLock ? '' : '  ⚠ MISMATCH'}`,
+      `Total in DB: ${all.length}`,
+    ];
+
+    const order = [...visible]
+      .sort(assetCompare)
+      .map((a) => a.assetCode || a.id.slice(0, 4))
+      .join(' → ');
+    lines.push(`Order: ${order || '(empty)'}`);
+
+    // The done-when, stated directly: what the lock is keeping out of view.
+    const hidden = all
+      .filter((a) => a.active && !matchesLockJs(a, role, lock))
+      .map((a) => a.assetCode || a.id.slice(0, 4));
+    lines.push(`Hidden from you (${hidden.length}): ${hidden.join(', ') || '(none)'}`);
+
+    for (const type of distinctValues(visible, (a) => a.assetType)) {
+      const sql = await database
+        .get('assets')
+        .query(activeAssetClause(), ...lockClauses, ...assetFilterClauses({ type }))
+        .fetchCount();
+      const js = visible.filter((a) => matchesAssetFilterJs(a, { type })).length;
+      lines.push(`type=${type}: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`);
+    }
+
+    for (const status of distinctValues(visible, (a) => a.currentStatusColor)) {
+      const sql = await database
+        .get('assets')
+        .query(activeAssetClause(), ...lockClauses, ...assetFilterClauses({ status }))
+        .fetchCount();
+      const js = visible.filter((a) => matchesAssetFilterJs(a, { status })).length;
+      lines.push(`status=${status}: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`);
+    }
+
+    console.log(`[DevProbes] asset dump\n${lines.join('\n')}`);
+    Alert.alert('Asset lock + filters (sql vs js)', lines.join('\n'));
+  };
+
   // The done-when's standing "hand query": for every CHIP of the current
   // effective role (a superset of the dashboard cards), count via the shared
   // Q-clauses AND via the independent plain-JS matcher over a full-table
@@ -278,6 +465,11 @@ export function DevProbes({ userId, role }: Props) {
       <DevButton label="Toggle 3 seed WOs (Today 2 · Overdue 1 · 50%)" onPress={toggleSeedWos} />
       <DevButton label="Toggle 8 F-fixture WOs (all statuses · tiers · null dues)" onPress={toggleSeedWosF} />
       <DevButton label="Dump chip counts (sql vs js) + open order" onPress={dumpCounts} />
+      <DevButton
+        label="Toggle 5 G-fixture assets (2 out of scope · history · PMS · WO)"
+        onPress={toggleSeedAssetsG}
+      />
+      <DevButton label="Dump asset lock + filters (sql vs js) + order" onPress={dumpAssetCounts} />
     </Card>
   );
 }
