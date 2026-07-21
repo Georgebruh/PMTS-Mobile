@@ -1,7 +1,42 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb'
 
+/**
+ * Feature I's local-only upload queue: one row per photo/signature file that
+ * still has to reach Drive. LOCAL ONLY — `syncEngine` strips this table from
+ * every push, and the gateway would ignore it anyway (it is absent from
+ * TABLE_SPECS). That is the whole point: `photo_urls` and `signature_url` may
+ * only ever hold final Drive URLs, so a `file://` URI can never land in the
+ * sheet (design gap #6).
+ *
+ * Exported so ./migrations.js builds the table from this exact array — the
+ * schema and the migration physically cannot drift.
+ *
+ * NB: upload progress lives in `state`, NOT in WatermelonDB's `_raw._status`.
+ * WatermelonDB 0.28 has no way to exclude a table from sync, so these rows get
+ * marked 'synced' after every push even though nothing was ever sent. Reading
+ * `_status` here would therefore be reading a lie. (Contrast Feature H's crew
+ * rows, where `_status` is exactly the right signal.)
+ */
+export const pendingUploadColumns = [
+  { name: 'report_id', type: 'string', isIndexed: true },   // FK -> maintenance_reports
+  { name: 'kind', type: 'string' },                          // 'photo' | 'signature'
+  { name: 'local_uri', type: 'string' },                     // file:// in Paths.document
+  { name: 'mime', type: 'string' },
+  { name: 'sort_order', type: 'number' },                    // photo order within the report
+  { name: 'state', type: 'string', isIndexed: true },        // 'pending' | 'uploaded' | 'failed'
+  { name: 'remote_url', type: 'string', isOptional: true },  // set once Drive has it
+  { name: 'attempts', type: 'number' },
+  { name: 'last_error', type: 'string', isOptional: true },
+  { name: 'created_at', type: 'number' },
+  { name: 'updated_at', type: 'number' },
+]
+
+// Version 2 (Feature I) added the local-only `pending_uploads` table. Any
+// further version bump MUST ship a matching step in ./migrations.js —
+// WatermelonDB resets the whole local database when it cannot migrate, which
+// would silently destroy writes still queued for push.
 export default appSchema({
-  version: 1,
+  version: 2,
   tables: [
     tableSchema({
       name: 'users',
@@ -141,5 +176,7 @@ export default appSchema({
         { name: 'updated_at', type: 'number' },
       ],
     }),
+
+    tableSchema({ name: 'pending_uploads', columns: pendingUploadColumns }),
   ],
 })
