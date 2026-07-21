@@ -88,6 +88,17 @@ export const glyphs = {
     { type: 'path', d: 'M7.5 8.5L12 4l4.5 4.5' },
     { type: 'path', d: 'M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16' },
   ],
+  // Profile menu: the header avatar's fallback when a user has no name to
+  // take initials from. Hard-hat worker — dome, brim, face, shoulders.
+  worker: [
+    { type: 'path', d: 'M6.5 9.2a5.5 5.5 0 0 1 11 0' },
+    { type: 'path', d: 'M4.2 9.2h15.6' },
+    { type: 'path', d: 'M9.2 9.2v1.5a2.8 2.8 0 0 0 5.6 0V9.2' },
+    {
+      type: 'path',
+      d: 'M4.6 20.5v-1.3c0-1.7 1.1-3.2 2.7-3.7l2.4-.8M19.4 20.5v-1.3c0-1.7-1.1-3.2-2.7-3.7l-2.4-.8',
+    },
+  ],
   // Feature I: a queued file that has stopped retrying and needs the user.
   warning: [
     { type: 'path', d: 'M12 4.5L21 19.5H3L12 4.5z' },
