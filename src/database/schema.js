@@ -61,7 +61,7 @@ export default appSchema({
         { name: 'wo_code', type: 'string', isIndexed: true },        // display id e.g. WO-2026-000123
         { name: 'asset_id', type: 'string', isIndexed: true },       // FK -> assets
         { name: 'tier', type: 'number', isIndexed: true },           // denormalized for sort
-        { name: 'wo_type', type: 'string' },                         // PMS / REPAIR / REWORK
+        { name: 'wo_type', type: 'string' },                         // PMS / REPAIR / CAPEX
         { name: 'source_report_id', type: 'string', isOptional: true }, // FK -> maintenance_reports
         { name: 'status', type: 'string', isIndexed: true },         // state machine
         { name: 'assigned_to', type: 'string', isOptional: true, isIndexed: true }, // FK -> users

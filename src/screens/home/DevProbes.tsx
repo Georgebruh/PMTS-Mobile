@@ -27,7 +27,7 @@ import {
   woCompare,
   FILTER_TITLES,
 } from '../../wo/queries';
-import { WO_STATUS } from '../../wo/status';
+import { WO_STATUS, WO_TYPE } from '../../wo/status';
 import type { ReportRecord, WoRecord } from '../../wo/types';
 
 // Dev-only dashboard harness (mounted behind __DEV__). Probe rule: run in
@@ -159,7 +159,7 @@ export function DevProbes({ userId, role }: Props) {
           w.asset.set(asset);
           w.woCode = row.code;
           w.tier = row.tier;
-          w.woType = 'PMS';
+          w.woType = WO_TYPE.PMS;
           w.status = row.status;
           w.assignedTo = userId;
           w.createdBy = userId;
@@ -221,7 +221,7 @@ export function DevProbes({ userId, role }: Props) {
           w.asset.set(asset);
           w.woCode = row.code;
           w.tier = row.tier;
-          w.woType = 'PMS';
+          w.woType = WO_TYPE.PMS;
           w.status = row.status;
           w.assignedTo = row.who;
           w.createdBy = userId;
@@ -331,7 +331,7 @@ export function DevProbes({ userId, role }: Props) {
         w.asset.set(g1);
         w.woCode = 'TEST-G-WO';
         w.tier = 1;
-        w.woType = 'PMS';
+        w.woType = WO_TYPE.PMS;
         w.status = WO_STATUS.ASSIGNED;
         w.assignedTo = userId;
         w.createdBy = userId;
@@ -505,19 +505,25 @@ export function DevProbes({ userId, role }: Props) {
     const startedAt = new Date(bounds.start + 8 * 60 * 60 * 1000);
     const endedAt = new Date(bounds.start + 10 * 60 * 60 * 1000);
 
+    // Types are spread across the fixture so all three labels — Periodic
+    // Maintenance, Repair, CAPEX — are on screen in one pass, including the
+    // longest one on the list card's type pill.
     const rows: {
       code: string;
       status: string;
       who: string | null;
       started: Date | null;
       ended: Date | null;
+      type: string;
     }[] = [
-      { code: 'TEST-H-1', status: WO_STATUS.ASSIGNED, who: userId, started: null, ended: null },
-      { code: 'TEST-H-2', status: WO_STATUS.IN_PROGRESS, who: userId, started: startedAt, ended: null },
-      { code: 'TEST-H-3', status: WO_STATUS.COMPLETED, who: userId, started: startedAt, ended: endedAt },
-      { code: 'TEST-H-4', status: WO_STATUS.ASSIGNED, who: OTHER_USER, started: null, ended: null },
-      { code: 'TEST-H-5', status: WO_STATUS.PENDING_APPROVAL, who: userId, started: startedAt, ended: endedAt },
-      { code: 'TEST-H-6', status: WO_STATUS.CLOSED, who: userId, started: startedAt, ended: endedAt },
+      { code: 'TEST-H-1', status: WO_STATUS.ASSIGNED, who: userId, started: null, ended: null, type: WO_TYPE.PMS },
+      { code: 'TEST-H-2', status: WO_STATUS.IN_PROGRESS, who: userId, started: startedAt, ended: null, type: WO_TYPE.REPAIR },
+      { code: 'TEST-H-3', status: WO_STATUS.COMPLETED, who: userId, started: startedAt, ended: endedAt, type: WO_TYPE.CAPEX },
+      { code: 'TEST-H-4', status: WO_STATUS.ASSIGNED, who: OTHER_USER, started: null, ended: null, type: WO_TYPE.REPAIR },
+      { code: 'TEST-H-5', status: WO_STATUS.PENDING_APPROVAL, who: userId, started: startedAt, ended: endedAt, type: WO_TYPE.PMS },
+      // Deliberate junk type — proves the tolerant fallback renders the raw
+      // cell rather than a blank when someone hand-edits the sheet.
+      { code: 'TEST-H-6', status: WO_STATUS.CLOSED, who: userId, started: startedAt, ended: endedAt, type: 'LEGACY-REWORK' },
     ];
 
     await database.write(async () => {
@@ -526,7 +532,7 @@ export function DevProbes({ userId, role }: Props) {
           w.asset.set(asset);
           w.woCode = row.code;
           w.tier = 1;
-          w.woType = 'PMS';
+          w.woType = row.type;
           w.status = row.status;
           w.assignedTo = row.who;
           w.createdBy = userId;
