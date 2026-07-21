@@ -7,10 +7,13 @@ import type { WoListFilter } from '../wo/queries';
 // K → Calendar, L → Staff).
 export type HomeStackParamList = {
   HomeMain: undefined;
-  // Feature E's typed entry into the Work Order List. The stub screen ships
-  // with E; Feature F replaces the screen, not the route — the filter param
-  // stays a plain serializable object.
+  // Feature E's typed entry into the Work Order List. The filter param stays
+  // a plain serializable object; Feature F's screen mutates it in place via
+  // setParams when a chip is tapped.
   WorkOrderList: { filter: WoListFilter };
+  // Feature F's typed entry into Work Order Detail. The stub screen ships
+  // with F; Feature H replaces the screen, not the route.
+  WorkOrderDetail: { woId: string };
 };
 
 export type AssetsStackParamList = {

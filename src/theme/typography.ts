@@ -64,4 +64,12 @@ export const text = {
     letterSpacing: 1.1, // .1em @ 11px
     textTransform: 'uppercase',
   },
+  barTitle: {
+    // .detail-top .bar-title (pushed-screen header)
+    fontFamily: fonts.bold,
+    fontSize: 13,
+    color: colors.faint,
+    letterSpacing: 1.3, // .1em @ 13px
+    textTransform: 'uppercase',
+  },
 } satisfies Record<string, TextStyle>;

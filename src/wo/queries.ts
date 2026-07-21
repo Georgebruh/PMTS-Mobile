@@ -121,10 +121,11 @@ export function progressClauses(
   };
 }
 
-// Frozen preview order: tier 1 → 2 → 3, then due date (nulls last), then code
-// for a stable tie-break. Sorted in JS because SQLite ORDER BY puts NULLs
-// first and the frozen rule wants them last.
-export function previewCompare(a: WoRecord, b: WoRecord): number {
+// The frozen list-wide order (preview AND every Feature F filter): tier
+// 1 → 2 → 3, then due date (nulls last), then code for a stable tie-break.
+// Sorted in JS because SQLite ORDER BY puts NULLs first and the frozen rule
+// wants them last.
+export function woCompare(a: WoRecord, b: WoRecord): number {
   if (a.tier !== b.tier) return a.tier - b.tier;
   const aDue = a.dueDate ? a.dueDate.getTime() : Infinity;
   const bDue = b.dueDate ? b.dueDate.getTime() : Infinity;
