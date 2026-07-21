@@ -11,11 +11,13 @@ import {
 } from 'react-native';
 
 import { formatDateTime } from '../asset/format';
+import { useAsset } from '../asset/hooks';
 import { useRole, useSession } from '../auth/session';
 import { ActionButton, ActionRow } from '../components/ActionRow';
 import { Card } from '../components/Card';
 import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
+import { Icon } from '../components/Icon';
 import { InfoCard, type InfoRowSpec } from '../components/InfoCard';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { SignaturePad, type PadSize } from '../components/SignaturePad';
@@ -31,6 +33,7 @@ import {
   addPhoto,
   discardDraftIfUntouched,
   removeUpload,
+  retryUpload,
   saveDraft,
   setSignature,
   submitReport,
@@ -38,7 +41,9 @@ import {
 } from '../report/mutations';
 import { blankParam, draftsFromRecords, withTrailingBlank } from '../report/params';
 import type { Stroke } from '../report/png';
+import type { UploadRecord } from '../report/types';
 import { deleteLocalFiles } from '../report/uploader';
+import { UPLOAD_STATE } from '../report/uploads';
 import {
   REPORT_STATUS_COLORS,
   validateSubmit,
@@ -46,6 +51,7 @@ import {
   type ReportField,
   type ReportStatusColor,
 } from '../report/validation';
+import { requestSync } from '../sync/syncManager';
 import { theme } from '../theme';
 import type { Viewer } from '../wo/actions';
 import { useWo } from '../wo/hooks';
@@ -75,6 +81,9 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
   const photos = usePhotos(uploads);
   const signature = useSignature(uploads);
   const wo = useWo(report?.workOrder.id ?? '');
+  // The report denormalizes the asset id at creation, so this resolves even if
+  // the work order row goes away underneath us.
+  const asset = useAsset(report?.asset.id ?? '');
 
   const [actionTaken, setActionTaken] = useState('');
   const [statusColor, setStatusColor] = useState<string | null>(null);
@@ -225,6 +234,24 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
     if (result.orphanedUri) await deleteLocalFiles([result.orphanedUri]);
   };
 
+  /**
+   * Requeues a stuck file and immediately asks the sync manager for a round —
+   * the uploader only runs after a sync, and a user who just tapped Retry has
+   * told us they believe they have a signal now. Waiting up to five minutes for
+   * the interval would read as the button doing nothing.
+   */
+  const onRetryUpload = async (uploadId: string) => {
+    if (busy) return;
+    setBusy(true);
+    const result = await retryUpload(uploadId);
+    setBusy(false);
+    if (!result.ok) {
+      Alert.alert('Could not retry', result.error);
+      return;
+    }
+    void requestSync('upload retry');
+  };
+
   const onSignatureDone = async (strokes: Stroke[], size: PadSize) => {
     if (strokes.length === 0 || size.width === 0) {
       setSigning(false);
@@ -279,15 +306,32 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
     return <SignatureOverlay onCancel={() => setSigning(false)} onDone={onSignatureDone} />;
   }
 
+  // Auto metadata, read-only. Split into two cards the same way Work Order
+  // Detail is, rather than one undifferentiated block.
   const metaRows: InfoRowSpec[] = [
+    // Display codes are server-owned and nothing assigns them yet, so an
+    // app-created report genuinely has none until the backend fills it in.
+    { label: 'Report', value: report.reportCode || '—' },
     { label: 'Work Order', value: wo?.woCode || '—' },
     { label: 'Type', value: wo ? (WO_TYPE_LABELS[wo.woType] ?? wo.woType) : '—' },
-    { label: 'Location', value: wo?.location || '—' },
     ...(wo?.startedAt ? [{ label: 'Started', value: formatDateTime(wo.startedAt) }] : []),
     ...(wo?.endedAt ? [{ label: 'Ended', value: formatDateTime(wo.endedAt) }] : []),
     ...(report.submittedAt
       ? [{ label: 'Submitted', value: formatDateTime(report.submittedAt) }]
       : []),
+  ];
+
+  // The tech's own confirmation that they are documenting the right equipment —
+  // the one screen in the app where getting the asset wrong is unrecoverable
+  // paperwork. '…' while the query has not emitted; never a silent blank.
+  const pending = asset === undefined;
+  const assetRows: InfoRowSpec[] = [
+    { label: 'Asset', value: pending ? '…' : asset?.equipmentName || '—' },
+    { label: 'Asset Code', value: pending ? '…' : asset?.assetCode || asset?.code || '—' },
+    { label: 'Category', value: pending ? '…' : asset?.assetType || '—' },
+    // The work order's denormalized location is where the job was actually
+    // raised against, which is what belongs on the report.
+    { label: 'Location', value: wo?.location || asset?.location || '—' },
   ];
 
   return (
@@ -297,6 +341,7 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
     >
       <DetailScreen title={readOnly ? 'Report' : 'Maintenance Report'} onBack={close}>
         <InfoCard label="Details" rows={metaRows} />
+        <InfoCard label="Asset" rows={assetRows} />
 
         <FieldCard label="Action Taken" required error={issueFor('actionTaken')}>
           <TextField
@@ -328,6 +373,7 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
             editable={!readOnly}
             onAdd={onAddPhoto}
             onRemove={onRemovePhoto}
+            onRetry={onRetryUpload}
             busy={busy}
           />
         )}
@@ -343,10 +389,12 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
         />
 
         <SignatureCard
-          hasSignature={!!signature}
+          signature={signature ?? null}
           editable={!readOnly && !busy}
           error={issueFor('signature')}
           onPress={() => setSigning(true)}
+          onRetry={onRetryUpload}
+          busy={busy}
         />
 
         {!readOnly && (
@@ -525,17 +573,43 @@ function StatusPicker({
   );
 }
 
+/**
+ * The signature, and — unlike the earlier version of this card — the state of
+ * its upload.
+ *
+ * That state matters more here than on any photo. The signature is REQUIRED, so
+ * a tech who has drawn one believes the report is filed; if its upload then
+ * fails permanently, signature_url stays empty in the sheet forever. Silence
+ * was the wrong default: this card now says what is happening and, when the
+ * upload has given up, offers the only way back.
+ */
 function SignatureCard({
-  hasSignature,
+  signature,
   editable,
   error,
   onPress,
+  onRetry,
+  busy,
 }: {
-  hasSignature: boolean;
+  signature: UploadRecord | null;
   editable: boolean;
   error: string | null;
   onPress: () => void;
+  onRetry: (uploadId: string) => void;
+  busy: boolean;
 }) {
+  const failed = signature?.state === UPLOAD_STATE.FAILED;
+  const queued = signature?.state === UPLOAD_STATE.PENDING;
+
+  const label =
+    signature === null
+      ? 'Tap to sign'
+      : failed
+        ? 'Signed — upload failed'
+        : queued
+          ? 'Signed — upload queued'
+          : 'Signed — tap to sign again';
+
   return (
     <FieldCard label="Signature" required error={error}>
       <Pressable
@@ -547,16 +621,43 @@ function SignatureCard({
           justifyContent: 'center',
           borderRadius: theme.radii.md,
           borderWidth: 1,
-          borderStyle: hasSignature ? 'solid' : 'dashed',
-          borderColor: hasSignature ? theme.colors.line : theme.colors.faint,
+          borderStyle: signature !== null ? 'solid' : 'dashed',
+          borderColor: signature !== null ? theme.colors.line : theme.colors.faint,
           backgroundColor: pressed ? theme.colors.bg : theme.colors.white,
           opacity: editable ? 1 : 0.6,
         })}
       >
-        <Text style={theme.text.body}>
-          {hasSignature ? 'Signed — tap to sign again' : 'Tap to sign'}
-        </Text>
+        <Text style={theme.text.body}>{label}</Text>
       </Pressable>
+
+      {/* Retry is offered independently of `editable`: a submitted report is
+          read-only, but its stuck signature still has to be able to reach
+          Drive. */}
+      {failed && signature !== null && (
+        <>
+          <Pressable
+            onPress={() => onRetry(signature.id)}
+            disabled={busy}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              marginTop: 8,
+              height: theme.sizes.button,
+              borderRadius: theme.radii.md,
+              backgroundColor: theme.colors.red,
+              opacity: pressed || busy ? 0.5 : 1,
+            })}
+          >
+            <Icon name="upload" size={14} color={theme.colors.white} />
+            <Text style={[theme.text.body, { color: theme.colors.white }]}>Retry upload</Text>
+          </Pressable>
+          {signature.lastError !== null && (
+            <Text style={[theme.text.micro, { marginTop: 6 }]}>{signature.lastError}</Text>
+          )}
+        </>
+      )}
     </FieldCard>
   );
 }

@@ -12,6 +12,10 @@ type Props = {
   editable: boolean;
   onAdd: () => void;
   onRemove: (uploadId: string) => void;
+  /** Requeues a failed upload. Available even when the report is read-only —
+   *  see retryUpload(): submit does not wait for Drive, so a submitted report
+   *  is exactly when a stuck file most needs a way out. */
+  onRetry: (uploadId: string) => void;
   busy?: boolean;
 };
 
@@ -26,8 +30,9 @@ const TILE = 96;
  * exists before an upload succeeds. The badge is what communicates upload
  * state; the picture never changes.
  */
-export function PhotoGrid({ photos, editable, onAdd, onRemove, busy = false }: Props) {
+export function PhotoGrid({ photos, editable, onAdd, onRemove, onRetry, busy = false }: Props) {
   const canAdd = editable && photos.length < MAX_PHOTOS && !busy;
+  const anyFailed = photos.some((p) => p.state === UPLOAD_STATE.FAILED);
 
   return (
     <Card style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12, marginTop: 14 }}>
@@ -49,7 +54,11 @@ export function PhotoGrid({ photos, editable, onAdd, onRemove, busy = false }: P
               resizeMode="cover"
             />
 
-            <UploadBadge state={photo.state} />
+            <UploadBadge
+              state={photo.state}
+              busy={busy}
+              onRetry={() => onRetry(photo.id)}
+            />
 
             {editable && (
               <Pressable
@@ -102,6 +111,13 @@ export function PhotoGrid({ photos, editable, onAdd, onRemove, busy = false }: P
           No photos were attached to this report.
         </Text>
       )}
+
+      {anyFailed && (
+        <Text style={[theme.text.micro, { color: theme.colors.red, marginTop: 8 }]}>
+          A photo could not be uploaded. Tap its red badge to try again once you have a
+          signal.
+        </Text>
+      )}
     </Card>
   );
 }
@@ -110,17 +126,28 @@ export function PhotoGrid({ photos, editable, onAdd, onRemove, busy = false }: P
  * Upload state, shown only when it is not the boring case. An uploaded photo
  * gets no badge: a green tick on every thumbnail would train people to ignore
  * the corner where the genuinely important warning appears.
+ *
+ * A failed badge is TAPPABLE and says so. The state it reports is otherwise a
+ * dead end — the queue stops retrying by itself after MAX_UPLOAD_ATTEMPTS, and
+ * on a submitted report the remove button is gone too, so this badge is the
+ * only way back.
  */
-function UploadBadge({ state }: { state: string }) {
+function UploadBadge({
+  state,
+  busy,
+  onRetry,
+}: {
+  state: string;
+  busy: boolean;
+  onRetry: () => void;
+}) {
   if (state === UPLOAD_STATE.UPLOADED) return null;
 
   const failed = state === UPLOAD_STATE.FAILED;
-  return (
+
+  const body = (pressed: boolean) => (
     <View
       style={{
-        position: 'absolute',
-        left: 4,
-        bottom: 4,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 3,
@@ -128,12 +155,28 @@ function UploadBadge({ state }: { state: string }) {
         paddingVertical: 3,
         borderRadius: theme.radii.pill,
         backgroundColor: failed ? theme.colors.red : theme.colors.ink,
+        opacity: pressed || (failed && busy) ? 0.5 : 1,
       }}
     >
       <Icon name={failed ? 'warning' : 'upload'} size={10} color={theme.colors.white} />
       <Text style={[theme.text.micro, { color: theme.colors.white, fontSize: 9 }]}>
-        {failed ? 'Failed' : 'Queued'}
+        {failed ? 'Retry' : 'Queued'}
       </Text>
     </View>
+  );
+
+  if (!failed) {
+    return <View style={{ position: 'absolute', left: 4, bottom: 4 }}>{body(false)}</View>;
+  }
+
+  return (
+    <Pressable
+      onPress={onRetry}
+      disabled={busy}
+      hitSlop={8}
+      style={{ position: 'absolute', left: 4, bottom: 4 }}
+    >
+      {({ pressed }) => body(pressed)}
+    </Pressable>
   );
 }
