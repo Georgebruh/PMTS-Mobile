@@ -2,6 +2,7 @@ import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { MaintenanceReportScreen } from '../screens/MaintenanceReportScreen';
+import { TagForRepairScreen } from '../screens/TagForRepairScreen';
 import { theme } from '../theme';
 import { TabNavigator } from './TabNavigator';
 import type { RootStackParamList } from './types';
@@ -31,6 +32,11 @@ export function RootNavigator() {
         <RootStack.Screen
           name="MaintenanceReport"
           component={MaintenanceReportScreen}
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
+        <RootStack.Screen
+          name="TagForRepair"
+          component={TagForRepairScreen}
           options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
         />
       </RootStack.Navigator>

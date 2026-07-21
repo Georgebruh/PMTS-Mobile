@@ -61,6 +61,15 @@ export type RootTabParamList = {
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<RootTabParamList>;
   MaintenanceReport: { reportId: string };
+  /**
+   * Feature J's asset picker, opened by the FAB. Root-level for the same
+   * absoluteFill reason as the report above — and doubly so here, since the
+   * thing that would draw over it is the FAB that opened it.
+   *
+   * Takes no params: Asset Detail already holds its asset and tags it in place
+   * via useTagAsset, so there is no pre-filled variant to carry.
+   */
+  TagForRepair: undefined;
 };
 
 declare global {

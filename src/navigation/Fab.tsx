@@ -1,18 +1,19 @@
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useRole } from '../auth/session';
 import type { IconName } from '../components/icons';
 import { Icon } from '../components/Icon';
+import type { RootStackParamList } from '../navigation/types';
 import { theme } from '../theme';
 
 const EDGE = 18;
 const ACTION_SIZE = 46;
 
-// Both actions are stubs: Tag Asset for Repair is wired up by Feature J;
-// Add Asset has no scheduled feature yet (flagged in the implementation plan).
-const tagForRepairStub = () =>
-  Alert.alert('Tag Asset for Repair', 'Tagging an asset for repair arrives with Feature J.');
+// Add Asset still has no scheduled feature (flagged in the implementation plan).
+// Tag Asset for Repair is live as of Feature J.
 const addAssetStub = () =>
   Alert.alert('Add Asset', 'Adding assets from the app is not available yet.');
 
@@ -23,6 +24,10 @@ const addAssetStub = () =>
 // two action rows rise above the FAB.
 export function Fab({ bottom }: { bottom: number }) {
   const role = useRole();
+  // The FAB is drawn inside the tab navigator but opens a ROOT-stack modal, so
+  // the picker is not covered by this very layer. Typed against the root list
+  // rather than the tab's — navigate() walks up to the parent navigator.
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [open, setOpen] = useState(false);
   // Keeps the dial mounted while the close animation runs out.
   const [visible, setVisible] = useState(false);
@@ -74,9 +79,11 @@ export function Fab({ bottom }: { bottom: number }) {
 
   if (role === null) return null; // unmounts via the root auth switch
 
+  const openTagForRepair = () => navigation.navigate('TagForRepair');
+
   const onFabPress = () => {
     if (role === 1) {
-      tagForRepairStub();
+      openTagForRepair();
     } else {
       open ? closeDial() : openDial();
     }
@@ -118,7 +125,7 @@ export function Fab({ bottom }: { bottom: number }) {
             <ActionRow
               label="Tag Asset for Repair"
               icon="wrench"
-              onPress={() => runAction(tagForRepairStub)}
+              onPress={() => runAction(openTagForRepair)}
             />
           </Animated.View>
         )}

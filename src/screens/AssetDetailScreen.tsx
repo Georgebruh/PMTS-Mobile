@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { formatDate, relativeDay } from '../asset/format';
 import {
@@ -23,7 +23,8 @@ import { InfoCard, type InfoRowSpec } from '../components/InfoCard';
 import { Pill } from '../components/Pill';
 import type { AssetsStackParamList } from '../navigation/types';
 import { theme } from '../theme';
-import { useTodayBounds } from '../wo/hooks';
+import { useOpenRepairAssetIds, useTodayBounds } from '../wo/hooks';
+import { useTagAsset } from '../wo/useTagAsset';
 
 type Props = NativeStackScreenProps<AssetsStackParamList, 'AssetDetail'>;
 
@@ -42,6 +43,12 @@ export function AssetDetailScreen({ navigation, route }: Props) {
   const history = useAssetHistory(assetId);
   const schedule = useAssetSchedule(assetId);
   const workOrders = useAssetWorkOrders(assetId, lockRole, userId);
+
+  // Feature J. The button reports the rule rather than hiding it: an asset with
+  // an open repair says so, instead of offering an action that would be refused.
+  const openRepairAssets = useOpenRepairAssetIds();
+  const { tag, busy } = useTagAsset();
+  const alreadyTagged = openRepairAssets?.has(assetId) ?? false;
 
   // The lock is re-checked HERE too, not just in the list: an L2 who flips to
   // Act-as-L1 while this screen is open must lose an asset outside the L1
@@ -125,14 +132,10 @@ export function AssetDetailScreen({ navigation, route }: Props) {
 
             <ActionRow>
               <ActionButton
-                label="Tag for Repair"
+                label={alreadyTagged ? 'Repair Requested' : 'Tag for Repair'}
                 icon="wrench"
-                onPress={() =>
-                  Alert.alert(
-                    'Tag for Repair',
-                    'Creating the repair work order arrives with Feature J.',
-                  )
-                }
+                disabled={alreadyTagged || busy || openRepairAssets === undefined}
+                onPress={() => void tag(asset)}
               />
               {jumpTarget !== null && (
                 <ActionButton
