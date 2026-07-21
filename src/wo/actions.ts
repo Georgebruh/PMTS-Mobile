@@ -96,16 +96,30 @@ export function woActions(wo: WoRecord, viewer: Viewer): WoActionState {
   }
 }
 
-export type WoAction = 'start' | 'complete';
+export type WoAction = 'start' | 'complete' | 'submitReport';
 
 /**
- * The single home of the H transitions. START and COMPLETE each write exactly
- * one status and one timestamp; nothing else in the app may spell these out.
- * Note COMPLETED means "work ended, report not yet submitted" — Feature I is
- * what moves a work order on to PENDING_APPROVAL.
+ * The single home of every work-order transition the app performs. Each action
+ * writes exactly one status (and, for start/complete, one timestamp); nothing
+ * else in the app may spell these strings out.
+ *
+ * START:         ASSIGNED    → IN_PROGRESS      (+ started_at)
+ * COMPLETE:      IN_PROGRESS → COMPLETED        (+ ended_at)
+ * SUBMITREPORT:  COMPLETED   → PENDING_APPROVAL (Feature I)
+ *
+ * COMPLETED means "work ended, report not yet submitted" — submitting the
+ * maintenance report is what carries a work order on to PENDING_APPROVAL, and
+ * L2's approval (Feature L) is what closes it.
  */
 export function nextStatusFor(action: WoAction): WoStatus {
-  return action === 'start' ? WO_STATUS.IN_PROGRESS : WO_STATUS.COMPLETED;
+  switch (action) {
+    case 'start':
+      return WO_STATUS.IN_PROGRESS;
+    case 'complete':
+      return WO_STATUS.COMPLETED;
+    case 'submitReport':
+      return WO_STATUS.PENDING_APPROVAL;
+  }
 }
 
 // ---------- crew names ----------
