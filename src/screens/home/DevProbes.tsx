@@ -31,6 +31,7 @@ import {
   FILTER_TITLES,
 } from '../../wo/queries';
 import { WO_STATUS, WO_TYPE } from '../../wo/status';
+import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';
 
 // Dev-only dashboard harness (mounted behind __DEV__). Probe rule: run in
@@ -767,6 +768,109 @@ export function DevProbes({ userId, role }: Props) {
     Alert.alert('Upload queue', lines.join('\n'));
   };
 
+  /**
+   * Feature J's standing hand query. Three things at once, because they are the
+   * three ways a tag can be wrong:
+   *
+   *   1. Per asset in scope — is it taggable, and does the greyed-out state in
+   *      the picker agree with findOpenRepair run independently here?
+   *   2. Every history row the APP authored — is its event_type inside the
+   *      frozen APP_EVENT_TYPES, and does its work_order_id resolve? A history
+   *      row pointing at a work order that never landed is the exact failure
+   *      the batched write exists to prevent, and nothing on screen would show it.
+   *   3. Orphans in the other direction — a tag-created work order with no
+   *      history event.
+   */
+  const dumpTagState = async () => {
+    const lock = areaLockFor({
+      assigned_area: user?.assigned_area ?? '',
+      assigned_locations: user?.assigned_locations ?? '',
+    });
+    const viewer = { role, userId, fullName: user?.full_name ?? '' };
+
+    const visible = (await database
+      .get('assets')
+      .query(activeAssetClause(), ...assetLockClauses(role, lock))
+      .fetch()) as unknown as AssetRecord[];
+
+    const allWos = (await database.get('work_orders').query().fetch()) as any[];
+    const lines: string[] = [`Role: L${role} · ${visible.length} assets in scope`, ''];
+
+    for (const asset of visible) {
+      const onAsset = allWos.filter((w) => w.asset.id === asset.id);
+      const open = findOpenRepair(onAsset as unknown as OpenRepairCandidate[]);
+      const gate = tagGate(asset, viewer, lock);
+      const verdict = open !== null ? 'BLOCKED (open repair)' : gate.canTag ? 'taggable' : 'gated';
+      lines.push(`${asset.assetCode || asset.id.slice(0, 6)}: ${verdict}`);
+      if (!gate.canTag) lines.push(`   ↳ ${gate.blockedReason}`);
+    }
+
+    // App-authored history: the event-type freeze and the pairing invariant.
+    const appHistory = (await database
+      .get('asset_history')
+      .query(Q.where('event_type', Q.oneOf(APP_EVENT_TYPES as string[])))
+      .fetch()) as any[];
+    const woIds = new Set(allWos.map((w) => w.id));
+
+    lines.push('', `App-authored history rows: ${appHistory.length}`);
+    for (const h of appHistory) {
+      const bad = !h.workOrderId || !woIds.has(h.workOrderId);
+      lines.push(
+        `  ${h.eventType} → wo ${String(h.workOrderId).slice(0, 6)} ${bad ? '⚠ ORPHAN' : '✓'}`,
+      );
+    }
+
+    // The other direction: a tag's work order with no event to explain it.
+    const taggedWos = allWos.filter(
+      (w) => w.woType === WO_TYPE.REPAIR && w.createdBy === userId && !w.woCode,
+    );
+    const historyWoIds = new Set(appHistory.map((h) => h.workOrderId));
+    const missing = taggedWos.filter((w) => !historyWoIds.has(w.id));
+    lines.push(
+      '',
+      `Tag-created REPAIR WOs: ${taggedWos.length}` +
+        (missing.length > 0 ? `  ⚠ ${missing.length} WITHOUT a history event` : ' ✓ all paired'),
+    );
+
+    console.log(`[DevProbes] tag state\n${lines.join('\n')}`);
+    Alert.alert('Tag state (J)', lines.join('\n'));
+  };
+
+  /**
+   * Deletes tag-created rows that have NEVER been pushed. The `_status ===
+   * 'created'` test is the whole safety argument: a row that already reached
+   * the sheet would be resurrected by the next full-snapshot pull (Feature H's
+   * crew rule), so refusing to touch it is the only honest behaviour.
+   */
+  const clearTags = async () => {
+    const wos = (await database
+      .get('work_orders')
+      .query(Q.where('wo_type', WO_TYPE.REPAIR), Q.where('created_by', userId))
+      .fetch()) as any[];
+    const fresh = wos.filter((w) => w._raw._status === 'created');
+    const freshIds = new Set(fresh.map((w) => w.id));
+
+    const history = (await database
+      .get('asset_history')
+      .query(Q.where('event_type', Q.oneOf(APP_EVENT_TYPES as string[])))
+      .fetch()) as any[];
+    const freshHistory = history.filter(
+      (h) => h._raw._status === 'created' && freshIds.has(h.workOrderId),
+    );
+
+    await database.write(async () => {
+      // History first — nothing may outlive the work order it points at.
+      for (const row of [...freshHistory, ...fresh]) await row.destroyPermanently();
+    });
+
+    const skipped = wos.length - fresh.length;
+    Alert.alert(
+      'Cleared tags',
+      `Deleted ${fresh.length} WO + ${freshHistory.length} history rows.` +
+        (skipped > 0 ? `\nSkipped ${skipped} already-synced WO — those must not be deleted.` : ''),
+    );
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -795,6 +899,8 @@ export function DevProbes({ userId, role }: Props) {
       />
       <DevButton label="Dump push preview (what drafts withhold)" onPress={dumpPushPreview} />
       <DevButton label="Dump upload queue + derived URLs" onPress={dumpUploads} />
+      <DevButton label="Dump tag state (J: gate · blocks · orphan pairs)" onPress={dumpTagState} />
+      <DevButton label="Clear my unsynced tags (J)" onPress={clearTags} />
     </Card>
   );
 }
