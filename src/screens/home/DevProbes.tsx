@@ -13,7 +13,9 @@ import type { AssetRecord } from '../../asset/types';
 import { useSession } from '../../auth/session';
 import { Card } from '../../components/Card';
 import { database } from '../../database/database';
+import { pendingChanges } from '../../database/syncEngine';
 import { theme } from '../../theme';
+import { woActions } from '../../wo/actions';
 import { chipsForRole } from '../../wo/chips';
 import { todayBounds } from '../../wo/dates';
 import {
@@ -57,6 +59,17 @@ const OTHER_USER = 'TEST-F-OTHER';
 const ASSET_CODES_G = ['TEST-G-1', 'TEST-G-2', 'TEST-G-3', 'TEST-G-4', 'TEST-G-5'];
 const OUT_AREA = 'ZZ-OUT-OF-AREA';
 const OUT_LOC = 'ZZ-OUT-OF-LOCATION';
+
+// Feature H fixture: one work order per branch of the action guard, so every
+// button state can be seen on a real device in one pass.
+const WO_CODES_H = [
+  'TEST-H-1',
+  'TEST-H-2',
+  'TEST-H-3',
+  'TEST-H-4',
+  'TEST-H-5',
+  'TEST-H-6',
+];
 
 type Props = {
   userId: string;
@@ -454,6 +467,139 @@ export function DevProbes({ userId, role }: Props) {
     Alert.alert('Dashboard counts (sql vs js)', lines.join('\n'));
   };
 
+  // Feature H fixture — one work order per branch of woActions(). Expected on
+  // the detail screen as L1, with ONLY this fixture seeded:
+  //   H-1 ASSIGNED, mine, unstarted      → Start Work + crew editable
+  //   H-2 IN_PROGRESS, mine, started     → Complete Work + crew editable
+  //   H-3 COMPLETED, mine, start+end     → no actions, crew STILL editable
+  //   H-4 ASSIGNED, someone else's       → no actions, "assigned to someone else"
+  //   H-5 PENDING_APPROVAL, mine         → fully frozen, crew read-only
+  //   H-6 CLOSED, mine                   → fully frozen, crew read-only
+  // As L2 every one of them is view-only.
+  const toggleSeedWosH = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_H)))
+      .fetch();
+    if (existing.length > 0) {
+      const ids = existing.map((w) => w.id);
+      const crew = await database
+        .get('work_order_crew')
+        .query(Q.where('work_order_id', Q.oneOf(ids)))
+        .fetch();
+      await database.write(async () => {
+        // Crew first — no row may outlive the work order it hangs off.
+        for (const row of [...crew, ...existing]) await row.destroyPermanently();
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      return;
+    }
+    const asset: any = assets[0];
+    const bounds = todayBounds();
+    const today = new Date(bounds.start + 9 * 60 * 60 * 1000);
+    const startedAt = new Date(bounds.start + 8 * 60 * 60 * 1000);
+    const endedAt = new Date(bounds.start + 10 * 60 * 60 * 1000);
+
+    const rows: {
+      code: string;
+      status: string;
+      who: string | null;
+      started: Date | null;
+      ended: Date | null;
+    }[] = [
+      { code: 'TEST-H-1', status: WO_STATUS.ASSIGNED, who: userId, started: null, ended: null },
+      { code: 'TEST-H-2', status: WO_STATUS.IN_PROGRESS, who: userId, started: startedAt, ended: null },
+      { code: 'TEST-H-3', status: WO_STATUS.COMPLETED, who: userId, started: startedAt, ended: endedAt },
+      { code: 'TEST-H-4', status: WO_STATUS.ASSIGNED, who: OTHER_USER, started: null, ended: null },
+      { code: 'TEST-H-5', status: WO_STATUS.PENDING_APPROVAL, who: userId, started: startedAt, ended: endedAt },
+      { code: 'TEST-H-6', status: WO_STATUS.CLOSED, who: userId, started: startedAt, ended: endedAt },
+    ];
+
+    await database.write(async () => {
+      for (const row of rows) {
+        await database.get('work_orders').create((w: any) => {
+          w.asset.set(asset);
+          w.woCode = row.code;
+          w.tier = 1;
+          w.woType = 'PMS';
+          w.status = row.status;
+          w.assignedTo = row.who;
+          w.createdBy = userId;
+          w.dueDate = today;
+          w.startedAt = row.started;
+          w.endedAt = row.ended;
+          w.site = asset.site;
+          w.location = asset.location;
+        });
+      }
+    });
+  };
+
+  // Feature H's answer to the count dump: the guard state for every fixture
+  // work order, computed from the stored row. Compare line by line against the
+  // buttons the detail screen actually renders.
+  const dumpActions = async () => {
+    const rows = (await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_H)))
+      .fetch()) as unknown as WoRecord[];
+
+    if (rows.length === 0) {
+      Alert.alert('No H fixture', 'Seed the 6 H-fixture work orders first.');
+      return;
+    }
+
+    const lines = [...rows]
+      .sort((a, b) => a.woCode.localeCompare(b.woCode))
+      .map((wo) => {
+        const s = woActions(wo, { role, userId });
+        const flags = [
+          s.canStart ? 'START' : null,
+          s.canComplete ? 'COMPLETE' : null,
+          s.canEditCrew ? 'crew' : null,
+        ]
+          .filter(Boolean)
+          .join(' + ');
+        return `${wo.woCode} [${wo.status}] → ${flags || 'none'}${
+          s.blockedReason ? `\n    ${s.blockedReason}` : ''
+        }`;
+      });
+
+    console.log(`[DevProbes] H action dump\n${lines.join('\n')}`);
+    Alert.alert(`Action guards (as L${role})`, lines.join('\n'));
+  };
+
+  // Feature H is the first code that writes rows meant to SURVIVE, so this is
+  // the first probe that matters after a sync rather than before one. Reads
+  // WatermelonDB's own _status: 'created'/'updated' rows are still queued for
+  // push, 'synced' rows have landed in the sheet.
+  const dumpPushQueue = async () => {
+    const tables = ['work_orders', 'work_order_crew', 'maintenance_reports', 'asset_history'];
+    const lines: string[] = [`pending: ${(await pendingChanges()) ? 'YES' : 'no'}`];
+
+    for (const table of tables) {
+      const rows = await database.get(table).query().fetch();
+      const tally: Record<string, number> = {};
+      for (const row of rows) {
+        const state = (row as any)._raw?._status ?? 'unknown';
+        tally[state] = (tally[state] ?? 0) + 1;
+      }
+      const summary = Object.keys(tally)
+        .sort()
+        .map((k) => `${k}=${tally[k]}`)
+        .join(' ');
+      lines.push(`${table}: ${summary || '(empty)'}`);
+    }
+
+    console.log(`[DevProbes] push queue\n${lines.join('\n')}`);
+    Alert.alert('Push queue (WatermelonDB _status)', lines.join('\n'));
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -470,6 +616,12 @@ export function DevProbes({ userId, role }: Props) {
         onPress={toggleSeedAssetsG}
       />
       <DevButton label="Dump asset lock + filters (sql vs js) + order" onPress={dumpAssetCounts} />
+      <DevButton
+        label="Toggle 6 H-fixture WOs (one per action-guard branch)"
+        onPress={toggleSeedWosH}
+      />
+      <DevButton label="Dump H action guards (vs on-screen buttons)" onPress={dumpActions} />
+      <DevButton label="Dump push queue (_status per table)" onPress={dumpPushQueue} />
     </Card>
   );
 }
