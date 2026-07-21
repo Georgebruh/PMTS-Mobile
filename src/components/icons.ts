@@ -74,6 +74,26 @@ export const glyphs = {
   // Feature H: removing a not-yet-synced crew member — the mockup has no
   // dismiss glyph.
   close: [{ type: 'path', d: 'M6 6l12 12M18 6L6 18' }],
+  // Feature I: attaching a photo to a maintenance report.
+  camera: [
+    {
+      type: 'path',
+      d: 'M3 8.5A1.5 1.5 0 0 1 4.5 7h2.2l1.3-2h7l1.3 2h2.2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9z',
+    },
+    { type: 'circle', cx: 12, cy: 13, r: 3.6 },
+  ],
+  // Feature I: an upload still on its way to Drive.
+  upload: [
+    { type: 'path', d: 'M12 16V4' },
+    { type: 'path', d: 'M7.5 8.5L12 4l4.5 4.5' },
+    { type: 'path', d: 'M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16' },
+  ],
+  // Feature I: a queued file that has stopped retrying and needs the user.
+  warning: [
+    { type: 'path', d: 'M12 4.5L21 19.5H3L12 4.5z' },
+    { type: 'path', d: 'M12 10v4' },
+    { type: 'circle', cx: 12, cy: 17, r: 0.6 },
+  ],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof glyphs;
