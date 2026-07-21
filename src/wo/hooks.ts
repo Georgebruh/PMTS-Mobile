@@ -12,6 +12,8 @@ import {
   woCompare,
   type WoListFilter,
 } from './queries';
+import { WO_TYPE } from './status';
+import { OPEN_REPAIR_STATUSES } from './tag';
 import { asSubscribable, type CrewRecord, type WoRecord } from './types';
 
 // Today's [start, end) window, recomputed whenever the app returns to the
@@ -171,6 +173,35 @@ export function useCrew(woId: string): CrewRecord[] | undefined {
     [woId],
   );
   return useMemo(() => (rows === undefined ? undefined : [...rows].sort(crewCompare)), [rows]);
+}
+
+/**
+ * Ids of every asset that already carries an open REPAIR work order (Feature J).
+ *
+ * Feeds the tag picker, which greys those assets out. One open repair per asset
+ * is a hard rule, so without this the user would pick an asset, confirm, and
+ * only then be told no — the block is much kinder as information than as a
+ * refusal. The mutation re-checks it inside its transaction regardless; this is
+ * the affordance, not the guard.
+ */
+export function useOpenRepairAssetIds(): ReadonlySet<string> | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<WoRecord[]>(
+        database
+          .get('work_orders')
+          .query(
+            Q.where('wo_type', WO_TYPE.REPAIR),
+            Q.where('status', Q.oneOf(OPEN_REPAIR_STATUSES as string[])),
+          )
+          .observe(),
+      ),
+    [],
+  );
+  return useMemo(
+    () => (rows === undefined ? undefined : new Set(rows.map((wo) => wo.asset.id))),
+    [rows],
+  );
 }
 
 /** Oldest first, id as a stable tie-break for rows created in the same ms. */
