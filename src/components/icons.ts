@@ -71,6 +71,9 @@ export const glyphs = {
     { type: 'path', d: 'M21 21v-2a4 4 0 0 0-3-3.87' },
     { type: 'path', d: 'M16 4.6a3.5 3.5 0 0 1 0 6.8' },
   ],
+  // Feature H: removing a not-yet-synced crew member — the mockup has no
+  // dismiss glyph.
+  close: [{ type: 'path', d: 'M6 6l12 12M18 6L6 18' }],
 } satisfies Record<string, IconShape[]>;
 
 export type IconName = keyof typeof glyphs;

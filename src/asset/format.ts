@@ -1,6 +1,7 @@
-// Date formatting for the asset screens. Written by hand rather than via Intl:
-// Hermes ships a trimmed ICU and the rest of the app has never depended on
-// Intl, so a plain lookup keeps output identical across devices.
+// Date formatting for the detail screens (assets, and Feature H's work order
+// timestamps). Written by hand rather than via Intl: Hermes ships a trimmed
+// ICU and the rest of the app has never depended on Intl, so a plain lookup
+// keeps output identical across devices.
 
 const MONTHS = [
   'January',
@@ -24,6 +25,22 @@ export function formatDate(value: Date | number | null | undefined): string {
   const ms = d.getTime();
   if (Number.isNaN(ms)) return '—';
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+/**
+ * "July 12, 2025 · 2:05 PM" — Feature H's started_at / ended_at stamps, where
+ * the time of day is the whole point. Null → em dash.
+ */
+export function formatDateTime(value: Date | number | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  const d = typeof value === 'number' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return '—';
+  const hours = d.getHours();
+  const suffix = hours < 12 ? 'AM' : 'PM';
+  // 0 → 12 (midnight), 13 → 1; anything else is already the 12-hour value.
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${formatDate(d)} · ${hour12}:${minutes} ${suffix}`;
 }
 
 /**
