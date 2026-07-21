@@ -24,7 +24,7 @@ import { APPROVAL_PENDING, isReportEditable, reportGate } from './actions';
 import { planParamWrites } from './params';
 import type { ParamRecord, ReportRecord, UploadRecord } from './types';
 import { UPLOAD_KIND } from './urls';
-import { UPLOAD_STATE } from './uploads';
+import { retryPatch, UPLOAD_STATE } from './uploads';
 import {
   canSubmit,
   isUntouchedDraft,
@@ -421,6 +421,45 @@ export async function removeUpload(
   } catch (e) {
     console.warn('removeUpload failed:', e);
     return { ok: false, error: 'Could not remove that file. Please try again.' };
+  }
+}
+
+/**
+ * Puts a failed file back in the queue.
+ *
+ * ⚠️ Deliberately NOT gated on isReportEditable, unlike every other mutation in
+ * this file. Submit does not wait for Drive — that is a frozen decision, so a
+ * tech in a basement can finish their job — which means the uploads most likely
+ * to fail are precisely the ones still in flight when the report went
+ * read-only. Gating retry on editability would strand photo_urls and
+ * signature_url permanently empty in the sheet with no in-app remedy, and the
+ * done-when asks for those URLs.
+ *
+ * Safe to allow after submit because pending_uploads is local-only queue state:
+ * retrying changes nothing an approver can see except filling in a URL that was
+ * always meant to be there. deriveUrls remains the only writer of the columns.
+ *
+ * Idempotent: a row that is already pending or already uploaded is a no-op.
+ */
+export async function retryUpload(uploadId: string): Promise<MutationResult> {
+  try {
+    return await database.write(async () => {
+      const row = await fetchOne('pending_uploads', uploadId);
+      if (row === null) return fail('That file is no longer queued.');
+      if (row.state !== UPLOAD_STATE.FAILED) return OK;
+
+      const patch = retryPatch(row as UploadRecord);
+      await row.update((u: any) => {
+        u.state = patch.state;
+        u.remoteUrl = patch.remoteUrl;
+        u.attempts = patch.attempts;
+        u.lastError = patch.lastError;
+      });
+      return OK;
+    });
+  } catch (e) {
+    console.warn('retryUpload failed:', e);
+    return fail('Could not retry that upload. Please try again.');
   }
 }
 
