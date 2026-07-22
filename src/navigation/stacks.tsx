@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { AssetDetailScreen } from '../screens/AssetDetailScreen';
 import { AssetListScreen } from '../screens/AssetListScreen';
 import { CalendarScreen } from '../screens/CalendarScreen';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -34,6 +35,8 @@ export function AssetsStack() {
   return (
     <AssetsStackNav.Navigator screenOptions={STACK_OPTIONS}>
       <AssetsStackNav.Screen name="AssetListMain" component={AssetListScreen} />
+      <AssetsStackNav.Screen name="AssetDetail" component={AssetDetailScreen} />
+      <AssetsStackNav.Screen name="WorkOrderDetail" component={WorkOrderDetailScreen} />
     </AssetsStackNav.Navigator>
   );
 }

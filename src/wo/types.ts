@@ -29,13 +29,34 @@ export type WoRecord = {
   woType: string;
   status: string;
   assignedTo: string | null;
+  assignedBy: string | null;
   dueDate: Date | null;
+  /** Stamped by Feature H's Start Work. Null until the lead starts. */
+  startedAt: Date | null;
+  /** Stamped by Feature H's Complete Work. Null until work ends. */
+  endedAt: Date | null;
+  createdBy: string;
   site: string;
   location: string;
   asset: {
     id: string;
     observe(): Subscribable<AssetRecord | null>;
   };
+};
+
+/**
+ * A work_order_crew row (Feature H). `_raw._status` is WatermelonDB's own sync
+ * state and is read deliberately: 'created' means the row has never been
+ * pushed, which is the ONLY state in which it may be removed — see
+ * canRemoveCrew in ./actions.
+ */
+export type CrewRecord = {
+  id: string;
+  crewCode: string;
+  workerName: string;
+  addedBy: string;
+  createdAt: Date | null;
+  _raw: { _status: string };
 };
 
 export type ReportRecord = {

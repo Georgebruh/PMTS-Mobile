@@ -12,13 +12,20 @@ type Props = {
   dateLine?: string;
   /** Shows the notification dot on the bell (Feature M wires the real state). */
   hasNotifications?: boolean;
+  /**
+   * Default: body is a ScrollView with the standard screen padding. Pass false
+   * when the body hosts its own scroll container (e.g. the Asset List's
+   * virtualized list) — children then manage horizontal padding and the bottom
+   * clearance for the floating nav pill + FAB themselves.
+   */
+  scroll?: boolean;
   children: ReactNode;
 };
 
 // Tab-screen scaffold from the mockup: header (title + live sync indicator +
 // bell), offline banner, optional date line, scrollable body. Bottom padding
 // leaves room for the floating nav pill + FAB that Feature D adds.
-export function Screen({ title, dateLine, hasNotifications, children }: Props) {
+export function Screen({ title, dateLine, hasNotifications, scroll = true, children }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -55,18 +62,22 @@ export function Screen({ title, dateLine, hasNotifications, children }: Props) {
         </Text>
       )}
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          paddingHorizontal: theme.spacing.xl,
-          // Clears the floating nav pill + FAB (62 high, 20 above the system
-          // inset) with breathing room on edge-to-edge Android.
-          paddingBottom: 128 + insets.bottom,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        {children}
-      </ScrollView>
+      {scroll ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingHorizontal: theme.spacing.xl,
+            // Clears the floating nav pill + FAB (62 high, 20 above the system
+            // inset) with breathing room on edge-to-edge Android.
+            paddingBottom: 128 + insets.bottom,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
+          {children}
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1 }}>{children}</View>
+      )}
     </View>
   );
 }

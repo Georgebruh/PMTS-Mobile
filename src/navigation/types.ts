@@ -18,6 +18,13 @@ export type HomeStackParamList = {
 
 export type AssetsStackParamList = {
   AssetListMain: undefined;
+  // Feature G's asset detail (+ history).
+  AssetDetail: { assetId: string };
+  // Feature G's "jump to the work order on this asset". Registered in THIS
+  // stack (as well as Home's) so the jump stays in the Assets tab and back
+  // returns to the asset — a cross-tab navigate would strand the user on Home.
+  // Feature H replaces the screen; both registrations follow automatically.
+  WorkOrderDetail: { woId: string };
 };
 
 export type CalendarStackParamList = {
