@@ -4,14 +4,14 @@
     "slug": "PMTS-App",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/PMTICON.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.aboitiz.pmts"
+      "bundleIdentifier": "com.aboitiz.pmtsystem"
     },
     "android": {
-      "package": "com.aboitiz.pmts",
+      "package": "com.aboitiz.pmtsystem",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
