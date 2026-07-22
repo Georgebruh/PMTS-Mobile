@@ -1,7 +1,9 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { ApprovalDetailScreen } from '../screens/ApprovalDetailScreen';
 import { AssetDetailScreen } from '../screens/AssetDetailScreen';
 import { AssetListScreen } from '../screens/AssetListScreen';
+import { AssignWorkOrderScreen } from '../screens/AssignWorkOrderScreen';
 import { CalendarScreen } from '../screens/CalendarScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { StaffScreen } from '../screens/StaffScreen';
@@ -55,6 +57,8 @@ export function StaffStack() {
   return (
     <StaffStackNav.Navigator screenOptions={STACK_OPTIONS}>
       <StaffStackNav.Screen name="StaffMain" component={StaffScreen} />
+      <StaffStackNav.Screen name="AssignWorkOrder" component={AssignWorkOrderScreen} />
+      <StaffStackNav.Screen name="ApprovalDetail" component={ApprovalDetailScreen} />
     </StaffStackNav.Navigator>
   );
 }
