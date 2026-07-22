@@ -26,10 +26,17 @@ import {
   matchesDraftJs,
   matchesFilterJs,
   progressClauses,
+  rangeClauses,
   woClauses,
   woCompare,
   FILTER_TITLES,
 } from '../../wo/queries';
+import {
+  CALENDAR_PRESETS,
+  formatRangeLabel,
+  matchesRangeJs,
+  rangeForPreset,
+} from '../../wo/ranges';
 import { WO_STATUS, WO_TYPE } from '../../wo/status';
 import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';
@@ -76,6 +83,25 @@ const WO_CODES_H = [
   'TEST-H-4',
   'TEST-H-5',
   'TEST-H-6',
+];
+
+// Feature K fixture: nine work orders straddling every calendar-preset
+// boundary. With ONLY this fixture seeded, the 1-Day (today) preset returns
+// exactly 3 — K-2 (t1) → K-1 (t2) → K-3 (t3), one of them CLOSED, proving the
+// calendar shows all statuses. K-8 has a null due date and belongs to NO range;
+// K-9 (−40d, CLOSED) surfaces only under a custom range reaching back a month.
+// The week/month presets shift with the run date, so the range dump proves them
+// by sql==js agreement and prints each preset's members to compare on screen.
+const WO_CODES_K = [
+  'TEST-K-1',
+  'TEST-K-2',
+  'TEST-K-3',
+  'TEST-K-4',
+  'TEST-K-5',
+  'TEST-K-6',
+  'TEST-K-7',
+  'TEST-K-8',
+  'TEST-K-9',
 ];
 
 type Props = {
@@ -871,6 +897,105 @@ export function DevProbes({ userId, role }: Props) {
     );
   };
 
+  // ---------- Feature K ----------
+
+  // Nine work orders around every preset boundary (see WO_CODES_K). Creation
+  // order is shuffled versus the frozen sort so the tier tie-break is real.
+  const toggleSeedWosK = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_K)))
+      .fetch();
+    if (existing.length > 0) {
+      await database.write(async () => {
+        for (const wo of existing) await wo.destroyPermanently();
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      return;
+    }
+    const asset: any = assets[0];
+    const bounds = todayBounds();
+    const DAY = 24 * 60 * 60 * 1000;
+    const H = 60 * 60 * 1000;
+    const at = (offset: number) => new Date(bounds.start + offset);
+
+    const rows: {
+      code: string;
+      tier: number;
+      status: string;
+      due: Date | null;
+      who: string | null;
+    }[] = [
+      { code: 'TEST-K-2', tier: 1, status: WO_STATUS.ASSIGNED, due: at(9 * H), who: userId }, // today
+      { code: 'TEST-K-1', tier: 2, status: WO_STATUS.IN_PROGRESS, due: at(9 * H), who: userId }, // today
+      { code: 'TEST-K-3', tier: 3, status: WO_STATUS.CLOSED, due: at(9 * H), who: userId }, // today, CLOSED
+      { code: 'TEST-K-4', tier: 1, status: WO_STATUS.COMPLETED, due: at(-15 * H), who: userId }, // yesterday
+      { code: 'TEST-K-5', tier: 2, status: WO_STATUS.UNASSIGNED, due: at(33 * H), who: OTHER_USER }, // tomorrow, other assignee
+      { code: 'TEST-K-6', tier: 1, status: WO_STATUS.ASSIGNED, due: at(8 * DAY + 9 * H), who: userId }, // +8 days
+      { code: 'TEST-K-7', tier: 2, status: WO_STATUS.ASSIGNED, due: at(40 * DAY + 9 * H), who: userId }, // +40 days
+      { code: 'TEST-K-8', tier: 1, status: WO_STATUS.ASSIGNED, due: null, who: userId }, // null → no range
+      { code: 'TEST-K-9', tier: 3, status: WO_STATUS.CLOSED, due: at(-40 * DAY + 9 * H), who: userId }, // −40 days
+    ];
+
+    await database.write(async () => {
+      for (const row of rows) {
+        await database.get('work_orders').create((w: any) => {
+          w.asset.set(asset);
+          w.woCode = row.code;
+          w.tier = row.tier;
+          w.woType = WO_TYPE.PMS;
+          w.status = row.status;
+          w.assignedTo = row.who;
+          w.createdBy = userId;
+          w.dueDate = row.due;
+          w.site = asset.site;
+          w.location = asset.location;
+        });
+      }
+    });
+  };
+
+  // Feature K's standing hand query, and the on-device proof of the done-when:
+  // for every concrete preset (custom excepted — it needs a user pick), count
+  // the work orders due in range through the shared rangeClauses AND through the
+  // independent plain-JS matchesRangeJs over a full-table fetch. The two must
+  // agree, and the printed members (tier-sorted) must match the screen for that
+  // preset. A null-due row must appear in none of them.
+  const dumpRangeCounts = async () => {
+    const bounds = todayBounds();
+    const today = new Date(bounds.start);
+
+    const allWos = (await database.get('work_orders').query().fetch()) as unknown as WoRecord[];
+
+    const lines: string[] = [];
+    for (const preset of CALENDAR_PRESETS) {
+      if (preset === 'custom') continue; // depends on a picked span
+      const range = rangeForPreset(preset, today, today);
+      const rows = (await database
+        .get('work_orders')
+        .query(...rangeClauses(range))
+        .fetch()) as unknown as WoRecord[];
+      const sql = rows.length;
+      const js = allWos.filter((wo) => matchesRangeJs(wo, range)).length;
+      const order = [...rows].sort(woCompare).map((w) => w.woCode || w.id.slice(0, 4)).join(' → ');
+      lines.push(
+        `${formatRangeLabel(preset, range)} [${preset}]: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`,
+      );
+      lines.push(`   ${order || '(empty)'}`);
+    }
+
+    const nullDue = allWos.filter((wo) => wo.dueDate === null).length;
+    lines.push('', `null-due WOs (must be in NO range): ${nullDue}`);
+
+    console.log(`[DevProbes] range dump\n${lines.join('\n')}`);
+    Alert.alert('Calendar ranges (sql vs js)', lines.join('\n'));
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -901,6 +1026,11 @@ export function DevProbes({ userId, role }: Props) {
       <DevButton label="Dump upload queue + derived URLs" onPress={dumpUploads} />
       <DevButton label="Dump tag state (J: gate · blocks · orphan pairs)" onPress={dumpTagState} />
       <DevButton label="Clear my unsynced tags (J)" onPress={clearTags} />
+      <DevButton
+        label="Toggle 9 K-fixture WOs (straddle every preset boundary)"
+        onPress={toggleSeedWosK}
+      />
+      <DevButton label="Dump calendar ranges (sql vs js) per preset" onPress={dumpRangeCounts} />
     </Card>
   );
 }
