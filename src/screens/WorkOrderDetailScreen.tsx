@@ -18,8 +18,8 @@ import { TierBadge } from '../components/TierBadge';
 import { useObservable } from '../hooks/useObservable';
 import type { HomeStackParamList, RootStackParamList } from '../navigation/types';
 import { reportGate } from '../report/actions';
-import { useDraftForWo } from '../report/hooks';
-import { openOrCreateDraft } from '../report/mutations';
+import { useDraftForWo, useRejectedReportForWo } from '../report/hooks';
+import { openOrCreateDraft, reopenForRevision } from '../report/mutations';
 import { theme } from '../theme';
 import { woActions, type Viewer } from '../wo/actions';
 import { useCrew, useTodayBounds, useWo } from '../wo/hooks';
@@ -54,6 +54,9 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
   const wo = useWo(woId);
   const crew = useCrew(woId);
   const draft = useDraftForWo(woId);
+  // Feature L: a report an L2 sent back for revision. Present only when the WO
+  // is back at COMPLETED and mine, so it never collides with the draft path.
+  const rejected = useRejectedReportForWo(woId);
   const [busy, setBusy] = useState(false);
 
   // The report is presented ABOVE the tab navigator (Feature I), so it is
@@ -114,6 +117,23 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
       return;
     }
     rootNavigation.navigate('MaintenanceReport', { reportId: result.reportId });
+  };
+
+  /**
+   * Reopens a rejected report for revision. The server left it submitted and
+   * moved the work order back to COMPLETED; reopenForRevision is the deliberate
+   * flip back to a draft, and then we drop straight into the report form.
+   */
+  const reviseReport = async () => {
+    if (busy || !rejected) return;
+    setBusy(true);
+    const result = await reopenForRevision(rejected.id, viewer);
+    setBusy(false);
+    if (!result.ok) {
+      Alert.alert('Cannot revise the report', result.error);
+      return;
+    }
+    rootNavigation.navigate('MaintenanceReport', { reportId: rejected.id });
   };
 
   // Complete is confirmed because it ends the job and stamps an irreversible
@@ -229,15 +249,15 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
                     disabled={busy}
                   />
                 )}
-                {/* The work is done and the report is not filed. A draft in
-                    progress says "Continue" — this is the landing point for the
-                    dashboard's Unfinished Reports card. */}
+                {/* The work is done and the report is not closed. A draft says
+                    "Continue" (the Unfinished Reports card lands here); a report
+                    an L2 sent back says "Revise"; otherwise "File". */}
                 {canReport && (
                   <ActionButton
-                    label={draft ? 'Continue Report' : 'File Report'}
+                    label={draft ? 'Continue Report' : rejected ? 'Revise Report' : 'File Report'}
                     icon="pencil"
                     variant="primary"
-                    onPress={openReport}
+                    onPress={rejected && !draft ? reviseReport : openReport}
                     disabled={busy}
                   />
                 )}

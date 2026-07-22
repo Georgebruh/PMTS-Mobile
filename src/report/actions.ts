@@ -94,5 +94,14 @@ export function canSubmitReport(
   return reportGate(wo, viewer).canFile && isReportEditable(report) && canSubmit(view);
 }
 
-/** Approval state stamped on submit. The server moves it on from here. */
+/**
+ * The three approval states, centralized here alongside APPROVAL_PENDING so
+ * Feature L's staff domain and this module cannot spell them differently.
+ *
+ * PENDING is stamped on submit (above). L2's review (Feature L) moves it to
+ * APPROVED or REJECTED — the app only stamps the report; the gateway's
+ * reconcileApprovals_ owns every consequence (close, rework spawn, send-back).
+ */
 export const APPROVAL_PENDING = 'PENDING';
+export const APPROVAL_APPROVED = 'APPROVED';
+export const APPROVAL_REJECTED = 'REJECTED';

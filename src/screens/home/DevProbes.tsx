@@ -40,6 +40,11 @@ import {
 import { WO_STATUS, WO_TYPE } from '../../wo/status';
 import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';
+import type { ReportRecord as MaintReportRecord } from '../../report/types';
+import { approvalGate, approvalOutcome, APPROVAL_STATUS } from '../../staff/approval';
+import { assignGate, eligibleStaff } from '../../staff/assign';
+import { buildNameMap, nameFor } from '../../staff/naming';
+import type { UserRecord } from '../../staff/types';
 
 // Dev-only dashboard harness (mounted behind __DEV__). Probe rule: run in
 // airplane mode and delete before reconnecting — a created-then-destroyed
@@ -85,24 +90,23 @@ const WO_CODES_H = [
   'TEST-H-6',
 ];
 
-// Feature K fixture: nine work orders straddling every calendar-preset
-// boundary. With ONLY this fixture seeded, the 1-Day (today) preset returns
-// exactly 3 — K-2 (t1) → K-1 (t2) → K-3 (t3), one of them CLOSED, proving the
-// calendar shows all statuses. K-8 has a null due date and belongs to NO range;
-// K-9 (−40d, CLOSED) surfaces only under a custom range reaching back a month.
-// The week/month presets shift with the run date, so the range dump proves them
-// by sql==js agreement and prints each preset's members to compare on screen.
-const WO_CODES_K = [
-  'TEST-K-1',
-  'TEST-K-2',
-  'TEST-K-3',
-  'TEST-K-4',
-  'TEST-K-5',
-  'TEST-K-6',
-  'TEST-K-7',
-  'TEST-K-8',
-  'TEST-K-9',
+// Feature L fixture. Work orders spanning the assignment queue (unassigned, one
+// in-area and one in an area no seeded staff covers) and the approval queue
+// (four PENDING reports, one per status colour, plus one already REJECTED to
+// exercise the revise loop and the "already reviewed" gate).
+const WO_CODES_L = [
+  'TEST-L-U1', // unassigned, in area → assignable, staff available
+  'TEST-L-U2', // unassigned, area no staff covers → assignable, eligible = 0
+  'TEST-L-P1', // pending approval, green  → approve closes
+  'TEST-L-P2', // pending approval, orange → approve spawns rework
+  'TEST-L-P3', // pending approval, red    → approve spawns rework
+  'TEST-L-P4', // pending approval, black  → approve spawns rework
+  'TEST-L-RJ', // completed, report already REJECTED → revise loop
 ];
+// Seeded role-1 users so the staff picker has real names to resolve (gap #8).
+const USER_CODES_L = ['TEST-L-STAFF-IN', 'TEST-L-STAFF-OUT', 'TEST-L-STAFF-OFF'];
+// A site no seeded staff is assigned to — U2 lands here so eligibleStaff = 0.
+const NO_STAFF_AREA = 'ZZ-NO-STAFF-AREA';
 
 type Props = {
   userId: string;
@@ -897,103 +901,182 @@ export function DevProbes({ userId, role }: Props) {
     );
   };
 
-  // ---------- Feature K ----------
+  // ---------- Feature L ----------
 
-  // Nine work orders around every preset boundary (see WO_CODES_K). Creation
-  // order is shuffled versus the frozen sort so the tier tie-break is real.
-  const toggleSeedWosK = async () => {
+  // Seeds the whole staff-tab fixture (7 work orders, 5 reports, 3 users) in one
+  // toggle, and on the second press deletes every row it created — reports and
+  // their parameters and the seeded users included — so a run never leaks. All
+  // rows are created-then-destroyed before reconnecting, so none ever push.
+  const toggleSeedL = async () => {
     const existing = await database
       .get('work_orders')
-      .query(Q.where('wo_code', Q.oneOf(WO_CODES_K)))
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_L)))
       .fetch();
+
     if (existing.length > 0) {
+      const woIds = existing.map((w) => w.id);
+      const reports = await database
+        .get('maintenance_reports')
+        .query(Q.where('work_order_id', Q.oneOf(woIds)))
+        .fetch();
+      const reportIds = reports.map((r) => r.id);
+      const params =
+        reportIds.length > 0
+          ? await database
+              .get('report_parameters')
+              .query(Q.where('report_id', Q.oneOf(reportIds)))
+              .fetch()
+          : [];
+      const users = await database
+        .get('users')
+        .query(Q.where('user_code', Q.oneOf(USER_CODES_L)))
+        .fetch();
       await database.write(async () => {
-        for (const wo of existing) await wo.destroyPermanently();
+        // Children before parents — nothing may outlive the row it hangs off.
+        for (const row of [...params, ...reports, ...existing, ...users]) {
+          await row.destroyPermanently();
+        }
       });
       return;
     }
 
     const assets = await database.get('assets').query(Q.take(1)).fetch();
     if (assets.length === 0) {
-      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      Alert.alert('No assets yet', 'Seed the G fixture first, or sync some in.');
       return;
     }
     const asset: any = assets[0];
-    const bounds = todayBounds();
-    const DAY = 24 * 60 * 60 * 1000;
-    const H = 60 * 60 * 1000;
-    const at = (offset: number) => new Date(bounds.start + offset);
-
-    const rows: {
-      code: string;
-      tier: number;
-      status: string;
-      due: Date | null;
-      who: string | null;
-    }[] = [
-      { code: 'TEST-K-2', tier: 1, status: WO_STATUS.ASSIGNED, due: at(9 * H), who: userId }, // today
-      { code: 'TEST-K-1', tier: 2, status: WO_STATUS.IN_PROGRESS, due: at(9 * H), who: userId }, // today
-      { code: 'TEST-K-3', tier: 3, status: WO_STATUS.CLOSED, due: at(9 * H), who: userId }, // today, CLOSED
-      { code: 'TEST-K-4', tier: 1, status: WO_STATUS.COMPLETED, due: at(-15 * H), who: userId }, // yesterday
-      { code: 'TEST-K-5', tier: 2, status: WO_STATUS.UNASSIGNED, due: at(33 * H), who: OTHER_USER }, // tomorrow, other assignee
-      { code: 'TEST-K-6', tier: 1, status: WO_STATUS.ASSIGNED, due: at(8 * DAY + 9 * H), who: userId }, // +8 days
-      { code: 'TEST-K-7', tier: 2, status: WO_STATUS.ASSIGNED, due: at(40 * DAY + 9 * H), who: userId }, // +40 days
-      { code: 'TEST-K-8', tier: 1, status: WO_STATUS.ASSIGNED, due: null, who: userId }, // null → no range
-      { code: 'TEST-K-9', tier: 3, status: WO_STATUS.CLOSED, due: at(-40 * DAY + 9 * H), who: userId }, // −40 days
-    ];
+    const area = asset.site;
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
 
     await database.write(async () => {
-      for (const row of rows) {
-        await database.get('work_orders').create((w: any) => {
+      const mkUser = (code: string, name: string, userArea: string, active: boolean) =>
+        database.get('users').create((u: any) => {
+          u.userCode = code;
+          u.fullName = name;
+          u.email = `${code.toLowerCase()}@example.com`;
+          u.roleLevel = 1;
+          u.isLead = false;
+          u.assignedArea = userArea;
+          u.assignedLocations = null;
+          u.active = active;
+        });
+      const staffIn = await mkUser('TEST-L-STAFF-IN', 'Ivy Nolasco', area, true);
+      await mkUser('TEST-L-STAFF-OUT', 'Otto Ramos', 'ZZ-OTHER-AREA', true);
+      await mkUser('TEST-L-STAFF-OFF', 'Ofelia Cruz', area, false);
+
+      const mkWo = (
+        code: string,
+        status: string,
+        site: string,
+        who: string | null,
+        started: Date | null,
+        ended: Date | null,
+      ) =>
+        database.get('work_orders').create((w: any) => {
           w.asset.set(asset);
-          w.woCode = row.code;
-          w.tier = row.tier;
+          w.woCode = code;
+          w.tier = asset.tier ?? 1;
           w.woType = WO_TYPE.PMS;
-          w.status = row.status;
-          w.assignedTo = row.who;
+          w.status = status;
+          w.assignedTo = who;
           w.createdBy = userId;
-          w.dueDate = row.due;
-          w.site = asset.site;
+          w.dueDate = new Date(now + 6 * HOUR);
+          w.startedAt = started;
+          w.endedAt = ended;
+          w.site = site;
           w.location = asset.location;
         });
-      }
+
+      await mkWo('TEST-L-U1', WO_STATUS.UNASSIGNED, area, null, null, null);
+      await mkWo('TEST-L-U2', WO_STATUS.UNASSIGNED, NO_STAFF_AREA, null, null, null);
+
+      const mkReportWo = async (code: string, color: string, approval: string, status: string) => {
+        const wo = await mkWo(code, status, area, staffIn.id, new Date(now - 3 * HOUR), new Date(now - HOUR));
+        const report = await database.get('maintenance_reports').create((r: any) => {
+          r.workOrder.set(wo);
+          r.asset.id = asset.id;
+          r.reportCode = '';
+          r.actionTaken = `Inspected and serviced (${color}).`;
+          r.statusColor = color;
+          r.reporterUserId = staffIn.id; // resolvable name (gap #8)
+          r.isDraft = false;
+          r.submittedAt = new Date(now - 30 * 60 * 1000);
+          r.approvalStatus = approval;
+        });
+        await database.get('report_parameters').create((p: any) => {
+          p.report.set(report);
+          p.paramCode = '';
+          p.paramName = 'Temperature';
+          p.unit = '°C';
+          p.measuredValue = '72';
+          p.sortOrder = 0;
+        });
+      };
+
+      await mkReportWo('TEST-L-P1', 'green', APPROVAL_STATUS.PENDING, WO_STATUS.PENDING_APPROVAL);
+      await mkReportWo('TEST-L-P2', 'orange', APPROVAL_STATUS.PENDING, WO_STATUS.PENDING_APPROVAL);
+      await mkReportWo('TEST-L-P3', 'red', APPROVAL_STATUS.PENDING, WO_STATUS.PENDING_APPROVAL);
+      await mkReportWo('TEST-L-P4', 'black', APPROVAL_STATUS.PENDING, WO_STATUS.PENDING_APPROVAL);
+      // Already sent back: WO returned to COMPLETED, report REJECTED — the L1
+      // revise affordance and the "already reviewed" approval gate both key off
+      // this row.
+      await mkReportWo('TEST-L-RJ', 'orange', APPROVAL_STATUS.REJECTED, WO_STATUS.COMPLETED);
     });
   };
 
-  // Feature K's standing hand query, and the on-device proof of the done-when:
-  // for every concrete preset (custom excepted — it needs a user pick), count
-  // the work orders due in range through the shared rangeClauses AND through the
-  // independent plain-JS matchesRangeJs over a full-table fetch. The two must
-  // agree, and the printed members (tier-sorted) must match the screen for that
-  // preset. A null-due row must appear in none of them.
-  const dumpRangeCounts = async () => {
-    const bounds = todayBounds();
-    const today = new Date(bounds.start);
+  // Feature L's standing hand query, in two halves matching the two queues.
+  // Assignment: each fixture WO's assignGate verdict and its eligible-staff
+  // count (names resolved). Approvals: each fixture report's approvalGate
+  // verdict and the outcome an approve would trigger. Compare line by line
+  // against the Staff tab and the two detail screens.
+  const dumpStaffState = async () => {
+    const users = (await database.get('users').query().fetch()) as unknown as UserRecord[];
+    const names = buildNameMap(users);
+    const viewer = { role, userId } as const;
 
-    const allWos = (await database.get('work_orders').query().fetch()) as unknown as WoRecord[];
-
-    const lines: string[] = [];
-    for (const preset of CALENDAR_PRESETS) {
-      if (preset === 'custom') continue; // depends on a picked span
-      const range = rangeForPreset(preset, today, today);
-      const rows = (await database
-        .get('work_orders')
-        .query(...rangeClauses(range))
-        .fetch()) as unknown as WoRecord[];
-      const sql = rows.length;
-      const js = allWos.filter((wo) => matchesRangeJs(wo, range)).length;
-      const order = [...rows].sort(woCompare).map((w) => w.woCode || w.id.slice(0, 4)).join(' → ');
-      lines.push(
-        `${formatRangeLabel(preset, range)} [${preset}]: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`,
-      );
-      lines.push(`   ${order || '(empty)'}`);
+    const wos = (await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_L)))
+      .fetch()) as unknown as WoRecord[];
+    if (wos.length === 0) {
+      Alert.alert('No L fixture', 'Seed the Feature L fixture first.');
+      return;
     }
 
-    const nullDue = allWos.filter((wo) => wo.dueDate === null).length;
-    lines.push('', `null-due WOs (must be in NO range): ${nullDue}`);
+    const lines: string[] = [`Role: L${role} · ${users.length} users in mirror`, '', 'ASSIGNMENT:'];
+    for (const wo of [...wos].sort((a, b) => a.woCode.localeCompare(b.woCode))) {
+      const g = assignGate(wo, viewer);
+      const pool = eligibleStaff(users, wo);
+      const poolNames = pool.map((u) => u.fullName).join(', ') || '(none)';
+      lines.push(
+        `  ${wo.woCode} [${wo.status}] assign=${g.canAssign ? 'YES' : 'no'} eligible=${pool.length} {${poolNames}}` +
+          (g.blockedReason ? `\n     ↳ ${g.blockedReason}` : ''),
+      );
+    }
 
-    console.log(`[DevProbes] range dump\n${lines.join('\n')}`);
-    Alert.alert('Calendar ranges (sql vs js)', lines.join('\n'));
+    const woById = new Map(wos.map((w) => [w.id, w]));
+    const reports = (await database
+      .get('maintenance_reports')
+      .query(Q.where('work_order_id', Q.oneOf(wos.map((w) => w.id))))
+      .fetch()) as unknown as MaintReportRecord[];
+
+    lines.push('', 'APPROVALS:');
+    for (const report of reports) {
+      const wo = woById.get(report.workOrder.id);
+      const g = wo ? approvalGate(report, wo, viewer) : null;
+      const outcome = approvalOutcome('approve', report.statusColor);
+      lines.push(
+        `  ${wo?.woCode ?? '??'} ${report.statusColor}/${report.approvalStatus} ` +
+          `review=${g?.canReview ? 'YES' : 'no'} approve→${outcome} ` +
+          `reporter="${nameFor(names, report.reporterUserId)}"` +
+          (g && !g.canReview ? `\n     ↳ ${g.blockedReason}` : ''),
+      );
+    }
+
+    console.log(`[DevProbes] staff state\n${lines.join('\n')}`);
+    Alert.alert('Staff state (L)', lines.join('\n'));
   };
 
   return (
@@ -1027,10 +1110,10 @@ export function DevProbes({ userId, role }: Props) {
       <DevButton label="Dump tag state (J: gate · blocks · orphan pairs)" onPress={dumpTagState} />
       <DevButton label="Clear my unsynced tags (J)" onPress={clearTags} />
       <DevButton
-        label="Toggle 9 K-fixture WOs (straddle every preset boundary)"
-        onPress={toggleSeedWosK}
+        label="Toggle L fixture (2 unassigned · 4 pending · 1 rejected · 3 staff)"
+        onPress={toggleSeedL}
       />
-      <DevButton label="Dump calendar ranges (sql vs js) per preset" onPress={dumpRangeCounts} />
+      <DevButton label="Dump staff state (L: assignGate · eligible · approvalGate)" onPress={dumpStaffState} />
     </Card>
   );
 }

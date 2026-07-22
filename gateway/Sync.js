@@ -182,10 +182,147 @@ function handlePush_(body) {
       if (records.length) pushTable_(table, records);
       // tableChanges.deleted is ignored — no hard deletes in this backend.
     });
+
+    // Feature L — the approval loop the spec puts server-side. The app only
+    // ever stamps approval_status/approved_by/approved_at on a report; every
+    // consequence (close, rework spawn, send-back) is reconciled here, still
+    // under this lock. Guarded on the push actually carrying reports so an
+    // ordinary work-order push does not pay for a full three-tab scan.
+    if (changes.maintenance_reports) reconcileApprovals_();
   } finally {
     lock.releaseLock();
   }
   return { ok: true };
+}
+
+/**
+ * Feature L — turns a just-pushed approval decision into its consequences.
+ * Runs inside handlePush_'s lock, reading the tabs AFTER the upserts so it sees
+ * the decision the app just wrote.
+ *
+ *   APPROVED + green      → close the work order            (+ REPORT_APPROVED)
+ *   APPROVED + non-green  → close it AND spawn a REPAIR      (+ REPORT_APPROVED,
+ *                           rework order linked by             REWORK_CREATED)
+ *                           source_report_id
+ *   REJECTED              → send the work order back to      (+ REPORT_REJECTED)
+ *                           COMPLETED for revision
+ *
+ * IDEMPOTENT two ways: every branch acts only while the work order is still
+ * PENDING_APPROVAL (once it moves to CLOSED/COMPLETED a re-push is a no-op), and
+ * the rework spawn additionally checks that no work order already carries this
+ * report's id in source_report_id — so a decision that syncs twice can never
+ * double-close, double-send-back, or double-spawn.
+ *
+ * This is also the first place the backend ASSIGNS DISPLAY CODES (wo_code,
+ * history_code) to rows it creates — the standing blank-code gap, answered for
+ * server-authored rows.
+ */
+function reconcileApprovals_() {
+  var reports = readTable_('maintenance_reports');
+  var wos = readTable_('work_orders');
+  var assets = readTable_('assets');
+  var users = readTable_('users');
+
+  var woById = {};
+  wos.forEach(function (w) { woById[rowId_(w)] = w; });
+  var assetById = {};
+  assets.forEach(function (a) { assetById[rowId_(a)] = a; });
+  var nameById = {};
+  users.forEach(function (u) { nameById[rowId_(u)] = String(u.full_name || ''); });
+  var reworkExists = {};
+  wos.forEach(function (w) {
+    var src = String(w.source_report_id == null ? '' : w.source_report_id).trim();
+    if (src) reworkExists[src] = true;
+  });
+
+  var woWrites = [];
+  var historyWrites = [];
+  var now = Date.now();
+
+  reports.forEach(function (r) {
+    var reportId = rowId_(r);
+    var decision = String(r.approval_status == null ? '' : r.approval_status).trim().toUpperCase();
+    if (decision !== 'APPROVED' && decision !== 'REJECTED') return;
+
+    var wo = woById[String(r.work_order_id == null ? '' : r.work_order_id).trim()];
+    if (!wo) return;
+    // The idempotency gate: only a work order still awaiting approval is acted
+    // on. After this run it is CLOSED or COMPLETED, so a re-push does nothing.
+    if (norm_(wo.status) !== 'pending_approval') return;
+
+    var reviewer = nameById[String(r.approved_by == null ? '' : r.approved_by).trim()] || '';
+
+    if (decision === 'REJECTED') {
+      woWrites.push({ id: rowId_(wo), status: 'COMPLETED' });
+      historyWrites.push(historyRow_(rowId_(wo), r, 'REPORT_REJECTED', reviewer, now));
+      return;
+    }
+
+    // APPROVED — the report is accepted; the work order closes either way.
+    woWrites.push({ id: rowId_(wo), status: 'CLOSED' });
+    historyWrites.push(historyRow_(rowId_(wo), r, 'REPORT_APPROVED', reviewer, now));
+
+    // Non-green means the equipment still needs work: spawn one repair order,
+    // unless one already exists for this report (the second idempotency gate).
+    var green = norm_(r.status_color) === 'green';
+    if (!green && !reworkExists[reportId]) {
+      var asset = assetById[String(r.asset_id == null ? '' : r.asset_id).trim()] || {};
+      var newWoId = Utilities.getUuid();
+      woWrites.push({
+        id: newWoId,
+        wo_code: nextCode_('WO'),
+        asset_id: r.asset_id,
+        tier: Number(asset.tier) || 0,
+        wo_type: 'REPAIR',
+        source_report_id: reportId,
+        status: 'UNASSIGNED',
+        created_by: r.approved_by || '',
+        site: asset.site || wo.site || '',
+        location: asset.location || wo.location || '',
+        created_at: now,
+      });
+      historyWrites.push(historyRow_(newWoId, r, 'REWORK_CREATED', reviewer, now));
+      reworkExists[reportId] = true;
+    }
+  });
+
+  // Batched by table so the whole reconcile is two sheet passes, not one per
+  // report. pushTable_ upserts by id, so the status-only work-order writes patch
+  // just that cell and the new rows insert.
+  if (woWrites.length) pushTable_('work_orders', woWrites);
+  if (historyWrites.length) pushTable_('asset_history', historyWrites);
+}
+
+/** Builds an asset_history record for a reconcile event. actor holds the
+ *  reviewer's DISPLAY NAME (gap #11: HistoryTimeline prints actor verbatim, so
+ *  an id would show as a raw UUID). */
+function historyRow_(woId, report, eventType, actor, now) {
+  return {
+    id: Utilities.getUuid(),
+    history_code: nextCode_('HIST'),
+    asset_id: report.asset_id,
+    event_type: eventType,
+    work_order_id: woId,
+    report_id: rowId_(report),
+    status_color: report.status_color || '',
+    actor: actor,
+    notes: '',
+    event_at: now,
+    created_at: now,
+  };
+}
+
+/**
+ * A readable, unique display code: PREFIX-YYYY-NNNNNN. The counter lives in a
+ * Script Property and is incremented under handlePush_'s lock, so it is
+ * serialized against every other writer — no two calls can mint the same code.
+ */
+function nextCode_(prefix) {
+  var props = PropertiesService.getScriptProperties();
+  var key = 'SEQ_' + prefix;
+  var n = Number(props.getProperty(key) || '0') + 1;
+  props.setProperty(key, String(n));
+  return prefix + '-' + new Date().getFullYear() + '-' + ('000000' + n).slice(-6);
 }
 
 /** Verifies the token and loads the caller's users row. */

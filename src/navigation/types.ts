@@ -38,6 +38,11 @@ export type CalendarStackParamList = {
 
 export type StaffStackParamList = {
   StaffMain: undefined;
+  // Feature L. Both are ordinary stack pushes, not root modals: unlike the
+  // report and the tag picker, they are content the floating nav pill + FAB may
+  // sit over exactly as they do on Work Order Detail — no full-screen takeover.
+  AssignWorkOrder: { woId: string };
+  ApprovalDetail: { reportId: string };
 };
 
 // Statically lists all four tabs even though Calendar/Staff only mount for

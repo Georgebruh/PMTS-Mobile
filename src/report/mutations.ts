@@ -20,7 +20,7 @@ import { database } from '../database/database';
 import type { Viewer } from '../wo/actions';
 import { nextStatusFor } from '../wo/actions';
 import type { WoRecord } from '../wo/types';
-import { APPROVAL_PENDING, isReportEditable, reportGate } from './actions';
+import { APPROVAL_PENDING, APPROVAL_REJECTED, isReportEditable, reportGate } from './actions';
 import { planParamWrites } from './params';
 import type { ParamRecord, ReportRecord, UploadRecord } from './types';
 import { UPLOAD_KIND } from './urls';
@@ -317,6 +317,57 @@ export async function discardDraftIfUntouched(
   } catch (e) {
     console.warn('discardDraftIfUntouched failed:', e);
     return { discarded: false, orphanedUris: [] };
+  }
+}
+
+/**
+ * Feature L — reopens a report an L2 REJECTED (sent back for revision).
+ *
+ * The reject loop is deliberately explicit rather than automatic: the gateway's
+ * reconcileApprovals_ returns the work order to COMPLETED and leaves the report
+ * submitted (is_draft = false, approval_status = REJECTED) — it does NOT
+ * silently un-submit. This mutation is the L1's conscious "Revise report" tap,
+ * which is the only thing that flips the report back to a draft.
+ *
+ * Guarded exactly like the report's other writes: it is still the assignee's
+ * own COMPLETED work order (reportGate.canFile), and the report is genuinely a
+ * rejected one. Idempotent — a report already back in draft is success.
+ *
+ * Known v1 edge (accepted, drafts-never-sync tradeoff): the report's parameters
+ * already synced on the first submit, so REMOVING a param row during revision
+ * would let the next full-snapshot pull resurrect it. Editing values and
+ * resubmitting is clean; row removal is the rare exception.
+ */
+export async function reopenForRevision(reportId: string, viewer: Viewer): Promise<MutationResult> {
+  try {
+    return await database.write(async () => {
+      const report = await fetchOne('maintenance_reports', reportId);
+      if (report === null) return fail('This report is no longer available.');
+
+      // Idempotent: already a draft (a second tap) is success.
+      if (report.isDraft === true) return OK;
+      if (report.approvalStatus !== APPROVAL_REJECTED) {
+        return fail('This report was not sent back for revision.');
+      }
+
+      const wo = await fetchOne('work_orders', report.workOrder.id);
+      if (wo === null) return fail('This work order is no longer available.');
+
+      // reportGate.canFile is true exactly for the assignee's own COMPLETED work
+      // order — which is where a rejected report's work order sits after the
+      // server sends it back.
+      const gate = reportGate(wo as WoRecord, viewer);
+      if (!gate.canFile) return fail(gate.blockedReason ?? 'This report cannot be revised.');
+
+      await report.update((r: any) => {
+        r.isDraft = true;
+        r.approvalStatus = ''; // a fresh draft again; submit re-stamps PENDING
+      });
+      return OK;
+    });
+  } catch (e) {
+    console.warn('reopenForRevision failed:', e);
+    return fail('Could not reopen the report. Please try again.');
   }
 }
 

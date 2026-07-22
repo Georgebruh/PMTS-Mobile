@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { database } from '../database/database';
 import { useObservable } from '../hooks/useObservable';
 import { asSubscribable } from '../wo/types';
+import { APPROVAL_REJECTED } from './actions';
 import { paramCompare } from './params';
 import type { ParamRecord, ReportRecord, UploadRecord } from './types';
 import { uploadCompare, UPLOAD_KIND } from './urls';
@@ -80,6 +81,32 @@ export function useDraftForWo(woId: string): ReportRecord | null | undefined {
         database
           .get('maintenance_reports')
           .query(Q.where('work_order_id', woId), Q.where('is_draft', true))
+          .observe(),
+      ),
+    [woId],
+  );
+  if (rows === undefined) return undefined;
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Feature L — a submitted report an L2 sent back for revision (approval_status
+ * REJECTED, still is_draft = false). Drives Work Order Detail's "Revise report"
+ * affordance: the server returned the work order to COMPLETED but left the
+ * report submitted, so the L1 reopens it deliberately (reopenForRevision)
+ * rather than the report silently un-submitting itself.
+ */
+export function useRejectedReportForWo(woId: string): ReportRecord | null | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<ReportRecord[]>(
+        database
+          .get('maintenance_reports')
+          .query(
+            Q.where('work_order_id', woId),
+            Q.where('is_draft', false),
+            Q.where('approval_status', APPROVAL_REJECTED),
+          )
           .observe(),
       ),
     [woId],
