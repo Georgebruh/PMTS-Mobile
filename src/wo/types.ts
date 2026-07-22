@@ -30,6 +30,8 @@ export type WoRecord = {
   status: string;
   assignedTo: string | null;
   assignedBy: string | null;
+  /** Stamped by Feature L's Assign. Null until an L2 assigns the work order. */
+  assignedAt: Date | null;
   dueDate: Date | null;
   /** Stamped by Feature H's Start Work. Null until the lead starts. */
   startedAt: Date | null;
