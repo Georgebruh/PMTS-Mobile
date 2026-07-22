@@ -26,10 +26,17 @@ import {
   matchesDraftJs,
   matchesFilterJs,
   progressClauses,
+  rangeClauses,
   woClauses,
   woCompare,
   FILTER_TITLES,
 } from '../../wo/queries';
+import {
+  CALENDAR_PRESETS,
+  formatRangeLabel,
+  matchesRangeJs,
+  rangeForPreset,
+} from '../../wo/ranges';
 import { WO_STATUS, WO_TYPE } from '../../wo/status';
 import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';

@@ -48,6 +48,7 @@ export function CalendarStack() {
   return (
     <CalendarStackNav.Navigator screenOptions={STACK_OPTIONS}>
       <CalendarStackNav.Screen name="CalendarMain" component={CalendarScreen} />
+      <CalendarStackNav.Screen name="WorkOrderDetail" component={WorkOrderDetailScreen} />
     </CalendarStackNav.Navigator>
   );
 }

@@ -29,6 +29,11 @@ export type AssetsStackParamList = {
 
 export type CalendarStackParamList = {
   CalendarMain: undefined;
+  // Feature K: tapping a calendar card opens WO Detail IN THIS TAB (the same
+  // reasoning as the Assets stack's registration) so back returns to the
+  // calendar rather than stranding the user on Home. Feature H's screen is
+  // reused verbatim.
+  WorkOrderDetail: { woId: string };
 };
 
 export type StaffStackParamList = {

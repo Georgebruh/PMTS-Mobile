@@ -5,9 +5,11 @@ import { AppState } from 'react-native';
 import { database } from '../database/database';
 import { useObservable } from '../hooks/useObservable';
 import { todayBounds, type DayBounds } from './dates';
+import type { DateRange } from './ranges';
 import {
   draftReportClauses,
   progressClauses,
+  rangeClauses,
   woClauses,
   woCompare,
   type WoListFilter,
@@ -132,6 +134,29 @@ export function useWoList(filter: WoListFilter, bounds: DayBounds): WoRecord[] |
           .observe(),
       ),
     [filter.kind, filter.assignedTo, filter.reporterId, bounds.start],
+  );
+  return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
+}
+
+/**
+ * Feature K — the L2 Calendar's rows: every work order whose due_date falls in
+ * `range`, in the frozen tier→due→code order (woCompare, the same order Feature
+ * F freezes). undefined until the first emission, and again whenever the range
+ * changes — a new preset or a ◀ ▶ day step re-subscribes via [start, end], so a
+ * stale list never shows under a new range (the useWoList pattern). The screen's
+ * count is rows.length: the header number and the list read one array and
+ * cannot disagree.
+ */
+export function useWoRange(range: DateRange): WoRecord[] | undefined {
+  const rows = useObservable(
+    () =>
+      asSubscribable<WoRecord[]>(
+        database
+          .get('work_orders')
+          .query(...rangeClauses(range))
+          .observe(),
+      ),
+    [range.start, range.end],
   );
   return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
 }
