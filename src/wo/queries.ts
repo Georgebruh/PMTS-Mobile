@@ -1,6 +1,7 @@
 import { Q } from '@nozbe/watermelondb';
 
 import type { DayBounds } from './dates';
+import type { DateRange } from './ranges';
 import {
   DONE_TODAY_STATUSES,
   L2_ASSIGNED_STATUSES,
@@ -119,6 +120,24 @@ export function progressClauses(
     denom,
     numer: [...denom, Q.where('status', Q.oneOf([...DONE_TODAY_STATUSES]))],
   };
+}
+
+// Feature K — the L2 Calendar's rows: work orders whose due_date falls inside
+// a calendar range [start, end). There is deliberately NO status clause: the
+// calendar is a pure date-range view (all statuses, CLOSED included — decision
+// locked with the user 2026-07-22), so the done-when's "exactly the WOs whose
+// due_date falls in range" is literally these three clauses and nothing else.
+//
+// The plain-JS counterpart is matchesRangeJs in ./ranges — the dev probe
+// recounts one against the other so a Q-clause bug cannot hide behind itself.
+export function rangeClauses(range: DateRange): Q.Clause[] {
+  return [
+    // A NULL due_date never satisfies a SQL comparison anyway; the notEq spells
+    // the intent out — an unscheduled work order is not on the calendar.
+    Q.where('due_date', Q.notEq(null)),
+    Q.where('due_date', Q.gte(range.start)),
+    Q.where('due_date', Q.lt(range.end)),
+  ];
 }
 
 // The frozen list-wide order (preview AND every Feature F filter): tier
