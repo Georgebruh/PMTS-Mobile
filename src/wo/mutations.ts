@@ -16,10 +16,21 @@
 // verbatim and there is no path where a write half-succeeds silently.
 
 import { Q } from '@nozbe/watermelondb';
+import { randomId } from '@nozbe/watermelondb/utils/common';
 
 import { database } from '../database/database';
 import { canRemoveCrew, nextStatusFor, woActions, validateCrewName, type Viewer } from './actions';
 import { WO_STATUS } from './status';
+import {
+  buildHistoryFields,
+  buildWoFields,
+  findOpenRepair,
+  tagGate,
+  type OpenRepairCandidate,
+  type TagLock,
+  type Tagger,
+  type TaggableAsset,
+} from './tag';
 import type { CrewRecord, WoRecord } from './types';
 
 export type MutationResult = { ok: true } | { ok: false; error: string };
@@ -176,5 +187,121 @@ export async function removeCrew(crewId: string): Promise<MutationResult> {
   } catch (e) {
     console.warn('removeCrew failed:', e);
     return fail('Could not remove that crew member. Please try again.');
+  }
+}
+
+// ---------- Feature J: Tag Asset for Repair ----------
+
+export type TagResult =
+  | { ok: true; woId: string; /** false when a re-submit re-found its own row */ created: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Mints the id of the work order a tag is ABOUT to create, before the write.
+ *
+ * This is what makes tagAssetForRepair idempotent, and it matters more here
+ * than anywhere else in the app. Every other mutation acts on a row the sheet
+ * already gave us, so a double tap has something to be idempotent AGAINST; a
+ * tag invents its row, so without a stable id the second tap simply makes a
+ * second work order. With one, the second tap re-finds the first tap's row and
+ * reports success.
+ *
+ * Uses WatermelonDB's own generator rather than a hand-rolled one: ids are
+ * restricted to [a-zA-Z0-9._] by the library (anything else breaks its SQL
+ * escaping), and this is the exact function sanitizedRaw would have called.
+ */
+export function newWorkOrderId(): string {
+  return randomId();
+}
+
+/**
+ * Creates the REPAIR work order for a tagged asset, plus its asset_history
+ * event, in ONE batch.
+ *
+ * The two rows are batched rather than created in sequence because a work order
+ * with no history event — or worse, a history event pointing at a work order
+ * that never landed — is a silent integrity failure that no screen would show.
+ * database.batch() is a single adapter call, so both rows commit or neither do.
+ *
+ * Refuses when the asset already carries an open REPAIR work order (decision
+ * locked in J planning: one open repair per asset). The one exception is a row
+ * this very call is retrying — see newWorkOrderId above.
+ */
+export async function tagAssetForRepair(
+  assetId: string,
+  woId: string,
+  viewer: Tagger,
+  lock: TagLock,
+): Promise<TagResult> {
+  try {
+    return await database.write(async () => {
+      const assets = await database.get('assets').query(Q.where('id', assetId)).fetch();
+      const asset = (assets.length > 0 ? assets[0] : null) as TaggableAsset | null;
+
+      // Re-run the gate INSIDE the transaction against the re-fetched row, not
+      // the props the button was rendered from: the picker's list, the route
+      // param and the effective role can all be a sync round — or a role flip —
+      // out of date by the time a finger lands.
+      const gate = tagGate(asset, viewer, lock);
+      if (!gate.canTag || asset === null) {
+        return { ok: false as const, error: gate.blockedReason ?? 'This asset cannot be tagged.' };
+      }
+
+      // Fetched by asset only; findOpenRepair applies the type/status rule in
+      // plain JS so the predicate the harness exercises is the one that runs.
+      const onAsset = (await database
+        .get('work_orders')
+        .query(Q.where('asset_id', assetId))
+        .fetch()) as unknown as OpenRepairCandidate[];
+
+      const existing = findOpenRepair(onAsset);
+      if (existing !== null) {
+        // Our own row from a double tap (or a retry after the screen re-rendered):
+        // success, not a duplicate complaint about work we just did.
+        if (existing.id === woId) return { ok: true as const, woId, created: false };
+        return {
+          ok: false as const,
+          error: 'This asset already has an open repair work order.',
+        };
+      }
+
+      const woFields = buildWoFields(asset, viewer);
+      const historyFields = buildHistoryFields(asset, viewer, woId, Date.now());
+
+      const woRecord = database.get('work_orders').prepareCreate((w: any) => {
+        // Set before anything else: `id` has no setter, and the whole
+        // idempotency argument rests on this row carrying the minted id.
+        w._raw.id = woId;
+        w.asset.id = woFields.assetId;
+        w.woCode = woFields.woCode;
+        w.tier = woFields.tier;
+        w.woType = woFields.woType;
+        w.status = woFields.status;
+        w.createdBy = woFields.createdBy;
+        w.site = woFields.site;
+        w.location = woFields.location;
+      });
+
+      const historyRecord = database.get('asset_history').prepareCreate((h: any) => {
+        h.asset.id = historyFields.assetId;
+        h.historyCode = historyFields.historyCode;
+        h.eventType = historyFields.eventType;
+        h.workOrderId = historyFields.workOrderId;
+        h.statusColor = historyFields.statusColor;
+        h.actor = historyFields.actor;
+        h.notes = historyFields.notes;
+        h.eventAt = new Date(historyFields.eventAt);
+      });
+
+      await database.batch(woRecord, historyRecord);
+
+      // No requestSync() here on purpose. Feature C's debounced write-batch
+      // trigger has to pick this up by itself — that is precisely what the
+      // offline half of this feature's done-when tests.
+      return { ok: true as const, woId, created: true };
+    });
+  } catch (e) {
+    console.warn('tagAssetForRepair failed:', e);
+    return { ok: false, error: 'Could not tag this asset. Please try again.' };
   }
 }

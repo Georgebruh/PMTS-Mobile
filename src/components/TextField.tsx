@@ -12,6 +12,18 @@ type Props = {
   editable?: boolean;
   /** Draws the field in the action red while an error is showing. */
   invalid?: boolean;
+  /**
+   * Feature I: Action Taken is a narrative field where a tech may write steps
+   * on separate lines, so the box grows and the return key inserts a newline
+   * instead of dismissing.
+   */
+  multiline?: boolean;
+  /**
+   * Defaults to 'words' — the crew field this component was built for takes
+   * names. Parameter names and values need 'sentences'/'none', because
+   * auto-capitalising a unit or a reading is wrong.
+   */
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 };
 
 // A plain single-line text field matching the mockup's .search-field surface
@@ -26,18 +38,22 @@ export function TextField({
   maxLength,
   editable = true,
   invalid = false,
+  multiline = false,
+  autoCapitalize = 'words',
 }: Props) {
   return (
     <View
       style={{
         flex: 1,
-        justifyContent: 'center',
+        justifyContent: multiline ? 'flex-start' : 'center',
         backgroundColor: editable ? theme.colors.white : theme.colors.bg,
         borderWidth: 1,
         borderColor: invalid ? theme.colors.red : theme.colors.line,
         borderRadius: theme.radii.md,
         paddingHorizontal: 14,
-        height: theme.sizes.searchField,
+        paddingVertical: multiline ? 12 : 0,
+        height: multiline ? undefined : theme.sizes.searchField,
+        minHeight: multiline ? theme.sizes.searchField * 2.5 : undefined,
       }}
     >
       <TextInput
@@ -49,11 +65,15 @@ export function TextField({
         maxLength={maxLength}
         editable={editable}
         autoCorrect={false}
-        // Worker names — capitalize each word, the way a name is written.
-        autoCapitalize="words"
-        returnKeyType="done"
+        autoCapitalize={autoCapitalize}
+        multiline={multiline}
+        // A multiline field must let return insert a newline, and must grow
+        // from the top rather than centring its first line on Android.
+        returnKeyType={multiline ? undefined : 'done'}
+        textAlignVertical={multiline ? 'top' : 'center'}
         style={{
           padding: 0,
+          flex: multiline ? 1 : undefined,
           fontFamily: theme.fonts.regular,
           fontSize: 13.5,
           color: theme.colors.ink,

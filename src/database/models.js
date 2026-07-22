@@ -152,6 +152,31 @@ export class ReportParameter extends Model {
   @relation('maintenance_reports', 'report_id') report
 }
 
+/**
+ * Feature I — a photo or signature file waiting to reach Drive. Local only:
+ * never pushed, never pulled (see schema.js). `state` is the upload truth;
+ * `_raw._status` is meaningless on this table.
+ *
+ * No @relation to maintenance_reports on purpose — the parent is addressed by
+ * plain id (`report_id`) because the uploader works from ids alone and the
+ * report may be re-fetched inside a different transaction.
+ */
+export class PendingUpload extends Model {
+  static table = 'pending_uploads'
+
+  @text('report_id') reportId
+  @text('kind') kind
+  @text('local_uri') localUri
+  @text('mime') mime
+  @field('sort_order') sortOrder
+  @text('state') state
+  @text('remote_url') remoteUrl
+  @field('attempts') attempts
+  @text('last_error') lastError
+  @readonly @date('created_at') createdAt
+  @readonly @date('updated_at') updatedAt
+}
+
 export class AssetHistory extends Model {
   static table = 'asset_history'
   static associations = {

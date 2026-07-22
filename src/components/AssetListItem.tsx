@@ -10,14 +10,22 @@ import { TierBadge } from './TierBadge';
 type Props = {
   asset: AssetRecord;
   onPress?: () => void;
+  /**
+   * Why this row cannot be chosen (Feature J's tag picker: the asset already
+   * carries an open repair work order). Dims the row and prints the reason —
+   * the rule is much kinder shown up front than as a refusal after the tap.
+   */
+  unavailableNote?: string | null;
 };
 
 // Asset row with the mockup's .asset-card anatomy — the same shape as
 // WorkOrderCard so the two lists read as one system. Every field is already on
 // the record, so unlike the WO row this needs no relation observation.
-export function AssetListItem({ asset, onPress }: Props) {
+export function AssetListItem({ asset, onPress, unavailableNote }: Props) {
+  const unavailable = !!unavailableNote;
+
   return (
-    <Pressable onPress={onPress} disabled={onPress === undefined}>
+    <Pressable onPress={onPress} disabled={onPress === undefined || unavailable}>
       {({ pressed }) => (
         <View
           style={{
@@ -27,10 +35,11 @@ export function AssetListItem({ asset, onPress }: Props) {
             paddingTop: 14,
             paddingHorizontal: theme.spacing.lg,
             paddingBottom: 13,
-            backgroundColor: pressed ? theme.colors.bg : theme.colors.white,
+            backgroundColor: pressed && !unavailable ? theme.colors.bg : theme.colors.white,
             borderWidth: 1,
             borderColor: theme.colors.line,
             borderRadius: theme.radii.xl,
+            opacity: unavailable ? 0.55 : 1,
           }}
         >
           <AssetStatusTile color={asset.currentStatusColor} />
@@ -53,6 +62,10 @@ export function AssetListItem({ asset, onPress }: Props) {
             <Text style={[theme.text.code, { marginTop: 2 }]}>
               {asset.assetCode || asset.code || '—'}
             </Text>
+
+            {unavailableNote ? (
+              <Text style={[theme.text.micro, { marginTop: 4 }]}>{unavailableNote}</Text>
+            ) : null}
 
             <View
               style={{

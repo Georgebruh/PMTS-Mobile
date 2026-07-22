@@ -1,4 +1,5 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 
@@ -15,7 +16,10 @@ import { InfoCard, type InfoRowSpec } from '../components/InfoCard';
 import { Pill } from '../components/Pill';
 import { TierBadge } from '../components/TierBadge';
 import { useObservable } from '../hooks/useObservable';
-import type { HomeStackParamList } from '../navigation/types';
+import type { HomeStackParamList, RootStackParamList } from '../navigation/types';
+import { reportGate } from '../report/actions';
+import { useDraftForWo } from '../report/hooks';
+import { openOrCreateDraft } from '../report/mutations';
 import { theme } from '../theme';
 import { woActions, type Viewer } from '../wo/actions';
 import { useCrew, useTodayBounds, useWo } from '../wo/hooks';
@@ -49,7 +53,13 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
 
   const wo = useWo(woId);
   const crew = useCrew(woId);
+  const draft = useDraftForWo(woId);
   const [busy, setBusy] = useState(false);
+
+  // The report is presented ABOVE the tab navigator (Feature I), so it is
+  // reached through the root navigator rather than this screen's stack — which
+  // is also why it works identically from the Home and Assets registrations.
+  const rootNavigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   // Live asset name — the same relation observe the list rows use, so an asset
   // renamed by a sync updates this screen without a refetch.
@@ -66,6 +76,10 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
   const viewer: Viewer = { role: lockRole, userId };
   const permitted = wo !== null && wo !== undefined && matchesLockJs(wo, lockRole, lock);
   const actions = permitted && wo ? woActions(wo, viewer) : null;
+
+  // Reporting has its own gate (COMPLETED, mine, effective L1) — deliberately
+  // not folded into woActions, which governs Start/Complete/crew.
+  const canReport = permitted && wo ? reportGate(wo, viewer).canFile : false;
 
   const runAction = async (
     action: () => Promise<MutationResult>,
@@ -85,6 +99,23 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
 
   const onStart = () => runAction(() => startWork(woId, viewer), 'Cannot start work');
 
+  /**
+   * Opens the maintenance report, creating the draft if there is none. Safe to
+   * tap twice: openOrCreateDraft reopens the existing draft rather than filing
+   * a second report against the same work order.
+   */
+  const openReport = async () => {
+    if (busy) return;
+    setBusy(true);
+    const result = await openOrCreateDraft(woId, viewer);
+    setBusy(false);
+    if (!result.ok) {
+      Alert.alert('Cannot open the report', result.error);
+      return;
+    }
+    rootNavigation.navigate('MaintenanceReport', { reportId: result.reportId });
+  };
+
   // Complete is confirmed because it ends the job and stamps an irreversible
   // timestamp — there is no un-complete. Start is not: it is the expected next
   // action on an assigned work order, and confirming both would only train
@@ -94,13 +125,9 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Complete',
-        onPress: () =>
-          runAction(() => completeWork(woId, viewer), 'Cannot complete work', () =>
-            Alert.alert(
-              'Work completed',
-              'Filing the maintenance report arrives with Feature I.',
-            ),
-          ),
+        // Straight into the report: completing is the moment the tech has the
+        // details in their head and is still standing at the equipment.
+        onPress: () => runAction(() => completeWork(woId, viewer), 'Cannot complete work', openReport),
       },
     ]);
 
@@ -180,9 +207,11 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
               />
             )}
 
-            {(actions?.canStart === true || actions?.canComplete === true) && (
+            {(actions?.canStart === true ||
+              actions?.canComplete === true ||
+              canReport) && (
               <ActionRow>
-                {actions.canStart && (
+                {actions?.canStart && (
                   <ActionButton
                     label="Start Work"
                     icon="clock"
@@ -191,12 +220,24 @@ export function WorkOrderDetailScreen({ navigation, route }: Props) {
                     disabled={busy}
                   />
                 )}
-                {actions.canComplete && (
+                {actions?.canComplete && (
                   <ActionButton
                     label="Complete Work"
                     icon="check"
                     variant="primary"
                     onPress={onComplete}
+                    disabled={busy}
+                  />
+                )}
+                {/* The work is done and the report is not filed. A draft in
+                    progress says "Continue" — this is the landing point for the
+                    dashboard's Unfinished Reports card. */}
+                {canReport && (
+                  <ActionButton
+                    label={draft ? 'Continue Report' : 'File Report'}
+                    icon="pencil"
+                    variant="primary"
+                    onPress={openReport}
                     disabled={busy}
                   />
                 )}

@@ -14,6 +14,9 @@ import { useSession } from '../../auth/session';
 import { Card } from '../../components/Card';
 import { database } from '../../database/database';
 import { pendingChanges } from '../../database/syncEngine';
+import type { UploadRecord } from '../../report/types';
+import { countByState } from '../../report/uploads';
+import { deriveUrls } from '../../report/urls';
 import { theme } from '../../theme';
 import { woActions } from '../../wo/actions';
 import { chipsForRole } from '../../wo/chips';
@@ -28,6 +31,7 @@ import {
   FILTER_TITLES,
 } from '../../wo/queries';
 import { WO_STATUS, WO_TYPE } from '../../wo/status';
+import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';
 
 // Dev-only dashboard harness (mounted behind __DEV__). Probe rule: run in
@@ -52,6 +56,9 @@ const WO_CODES_F = [
 ];
 /** Fake assignee id — matches no real user, exercising the L1 me-scope. */
 const OTHER_USER = 'TEST-F-OTHER';
+
+// Feature I: one work order in the only state that accepts a report.
+const WO_CODES_I = ['TEST-I-1'];
 
 // Feature G fixture: mirrors the Node harness's asset set exactly, but built
 // from the SIGNED-IN user's own area/locations so the lock is exercised
@@ -606,6 +613,264 @@ export function DevProbes({ userId, role }: Props) {
     Alert.alert('Push queue (WatermelonDB _status)', lines.join('\n'));
   };
 
+  // ---------- Feature I ----------
+
+  // One COMPLETED work order assigned to me: the single state from which a
+  // report may be filed. Press again to remove it AND everything it spawned,
+  // so a probe run never leaves a report or a queued file behind.
+  const toggleSeedWoI = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_I)))
+      .fetch();
+
+    if (existing.length > 0) {
+      await database.write(async () => {
+        for (const wo of existing) {
+          const reports = await database
+            .get('maintenance_reports')
+            .query(Q.where('work_order_id', wo.id))
+            .fetch();
+          for (const report of reports) {
+            for (const p of await database
+              .get('report_parameters')
+              .query(Q.where('report_id', report.id))
+              .fetch()) {
+              await p.destroyPermanently();
+            }
+            for (const u of await database
+              .get('pending_uploads')
+              .query(Q.where('report_id', report.id))
+              .fetch()) {
+              await u.destroyPermanently();
+            }
+            await report.destroyPermanently();
+          }
+          await wo.destroyPermanently();
+        }
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the G fixture first, or sync some in.');
+      return;
+    }
+    const asset: any = assets[0];
+    const now = Date.now();
+
+    await database.write(async () => {
+      await database.get('work_orders').create((w: any) => {
+        w.woCode = WO_CODES_I[0];
+        w.asset.set(asset);
+        w.tier = asset.tier ?? 1;
+        w.woType = WO_TYPE.PMS;
+        w.status = WO_STATUS.COMPLETED; // the only status that accepts a report
+        w.assignedTo = userId;
+        w.createdBy = userId;
+        w.dueDate = new Date(now);
+        w.startedAt = new Date(now - 2 * 60 * 60 * 1000);
+        w.endedAt = new Date(now - 30 * 60 * 1000);
+        w.site = asset.site;
+        w.location = asset.location;
+      });
+    });
+  };
+
+  /**
+   * What a push would actually carry. This is the on-device proof of the
+   * drafts-never-sync decision: every number in the "withheld" block must stay
+   * withheld until the report is submitted, and the moment it IS submitted the
+   * same rows must move to the "will push" block — parameters included, which
+   * is what the touch in submitReport exists to guarantee.
+   */
+  const dumpPushPreview = async () => {
+    const reports = await database.get('maintenance_reports').query().fetch();
+    const drafts = reports.filter((r: any) => r.isDraft === true);
+    const submitted = reports.filter((r: any) => r.isDraft !== true);
+    const draftIds = new Set(drafts.map((r: any) => r.id));
+
+    const params = await database.get('report_parameters').query().fetch();
+    const heldParams = params.filter((p: any) => draftIds.has(p.report.id));
+    const uploads = await database.get('pending_uploads').query().fetch();
+
+    const statusOf = (rows: any[]) => {
+      const tally: Record<string, number> = {};
+      for (const r of rows) {
+        const s = r._raw._status as string;
+        tally[s] = (tally[s] ?? 0) + 1;
+      }
+      return Object.keys(tally).sort().map((k) => `${k}=${tally[k]}`).join(' ') || '(none)';
+    };
+
+    const lines = [
+      'WITHHELD (local only):',
+      `  draft reports: ${drafts.length}  [${statusOf(drafts)}]`,
+      `  their params:  ${heldParams.length}  [${statusOf(heldParams)}]`,
+      `  uploads:       ${uploads.length}  [${statusOf(uploads)}]`,
+      '',
+      'WILL PUSH:',
+      `  submitted reports: ${submitted.length}  [${statusOf(submitted)}]`,
+      `  their params:      ${params.length - heldParams.length}  [${statusOf(
+        params.filter((p: any) => !draftIds.has(p.report.id)),
+      )}]`,
+      '',
+      'NB _status=synced on a WITHHELD row is expected — WatermelonDB marks',
+      'stripped rows synced even though nothing was sent. That is exactly why',
+      'submitReport touches every param on the way out.',
+    ];
+
+    console.log(`[DevProbes] push preview\n${lines.join('\n')}`);
+    Alert.alert('Push preview', lines.join('\n'));
+  };
+
+  /** The upload queue, and the URL columns it currently derives. */
+  const dumpUploads = async () => {
+    const uploads = (await database
+      .get('pending_uploads')
+      .query()
+      .fetch()) as unknown as UploadRecord[];
+
+    if (uploads.length === 0) {
+      Alert.alert('Upload queue', 'Empty.');
+      return;
+    }
+
+    const counts = countByState(uploads);
+    const byReport = new Map<string, UploadRecord[]>();
+    for (const u of uploads) {
+      byReport.set(u.reportId, [...(byReport.get(u.reportId) ?? []), u]);
+    }
+
+    const lines = [`pending=${counts.pending} uploaded=${counts.uploaded} failed=${counts.failed}`, ''];
+    for (const [reportId, rows] of byReport) {
+      const derived = deriveUrls(rows);
+      lines.push(`report ${reportId.slice(0, 8)}…`);
+      for (const r of rows) {
+        lines.push(
+          `  ${r.kind} #${r.sortOrder} ${r.state} attempts=${r.attempts}` +
+            (r.lastError ? ` err="${r.lastError}"` : ''),
+        );
+      }
+      lines.push(`  → photo_urls: ${derived.photoUrls || '(empty)'}`);
+      lines.push(`  → signature_url: ${derived.signatureUrl ?? '(none)'}`);
+      // The gap #6 assertion, checked against live data rather than a fixture.
+      const leak = [derived.photoUrls, derived.signatureUrl ?? '']
+        .join(';')
+        .split(';')
+        .filter((v) => v.trim() !== '' && !/^https?:\/\//i.test(v));
+      lines.push(leak.length > 0 ? `  ⚠️ LOCAL URI LEAK: ${leak.join(', ')}` : '  ✓ no local URIs');
+      lines.push('');
+    }
+
+    console.log(`[DevProbes] uploads\n${lines.join('\n')}`);
+    Alert.alert('Upload queue', lines.join('\n'));
+  };
+
+  /**
+   * Feature J's standing hand query. Three things at once, because they are the
+   * three ways a tag can be wrong:
+   *
+   *   1. Per asset in scope — is it taggable, and does the greyed-out state in
+   *      the picker agree with findOpenRepair run independently here?
+   *   2. Every history row the APP authored — is its event_type inside the
+   *      frozen APP_EVENT_TYPES, and does its work_order_id resolve? A history
+   *      row pointing at a work order that never landed is the exact failure
+   *      the batched write exists to prevent, and nothing on screen would show it.
+   *   3. Orphans in the other direction — a tag-created work order with no
+   *      history event.
+   */
+  const dumpTagState = async () => {
+    const lock = areaLockFor({
+      assigned_area: user?.assigned_area ?? '',
+      assigned_locations: user?.assigned_locations ?? '',
+    });
+    const viewer = { role, userId, fullName: user?.full_name ?? '' };
+
+    const visible = (await database
+      .get('assets')
+      .query(activeAssetClause(), ...assetLockClauses(role, lock))
+      .fetch()) as unknown as AssetRecord[];
+
+    const allWos = (await database.get('work_orders').query().fetch()) as any[];
+    const lines: string[] = [`Role: L${role} · ${visible.length} assets in scope`, ''];
+
+    for (const asset of visible) {
+      const onAsset = allWos.filter((w) => w.asset.id === asset.id);
+      const open = findOpenRepair(onAsset as unknown as OpenRepairCandidate[]);
+      const gate = tagGate(asset, viewer, lock);
+      const verdict = open !== null ? 'BLOCKED (open repair)' : gate.canTag ? 'taggable' : 'gated';
+      lines.push(`${asset.assetCode || asset.id.slice(0, 6)}: ${verdict}`);
+      if (!gate.canTag) lines.push(`   ↳ ${gate.blockedReason}`);
+    }
+
+    // App-authored history: the event-type freeze and the pairing invariant.
+    const appHistory = (await database
+      .get('asset_history')
+      .query(Q.where('event_type', Q.oneOf(APP_EVENT_TYPES as string[])))
+      .fetch()) as any[];
+    const woIds = new Set(allWos.map((w) => w.id));
+
+    lines.push('', `App-authored history rows: ${appHistory.length}`);
+    for (const h of appHistory) {
+      const bad = !h.workOrderId || !woIds.has(h.workOrderId);
+      lines.push(
+        `  ${h.eventType} → wo ${String(h.workOrderId).slice(0, 6)} ${bad ? '⚠ ORPHAN' : '✓'}`,
+      );
+    }
+
+    // The other direction: a tag's work order with no event to explain it.
+    const taggedWos = allWos.filter(
+      (w) => w.woType === WO_TYPE.REPAIR && w.createdBy === userId && !w.woCode,
+    );
+    const historyWoIds = new Set(appHistory.map((h) => h.workOrderId));
+    const missing = taggedWos.filter((w) => !historyWoIds.has(w.id));
+    lines.push(
+      '',
+      `Tag-created REPAIR WOs: ${taggedWos.length}` +
+        (missing.length > 0 ? `  ⚠ ${missing.length} WITHOUT a history event` : ' ✓ all paired'),
+    );
+
+    console.log(`[DevProbes] tag state\n${lines.join('\n')}`);
+    Alert.alert('Tag state (J)', lines.join('\n'));
+  };
+
+  /**
+   * Deletes tag-created rows that have NEVER been pushed. The `_status ===
+   * 'created'` test is the whole safety argument: a row that already reached
+   * the sheet would be resurrected by the next full-snapshot pull (Feature H's
+   * crew rule), so refusing to touch it is the only honest behaviour.
+   */
+  const clearTags = async () => {
+    const wos = (await database
+      .get('work_orders')
+      .query(Q.where('wo_type', WO_TYPE.REPAIR), Q.where('created_by', userId))
+      .fetch()) as any[];
+    const fresh = wos.filter((w) => w._raw._status === 'created');
+    const freshIds = new Set(fresh.map((w) => w.id));
+
+    const history = (await database
+      .get('asset_history')
+      .query(Q.where('event_type', Q.oneOf(APP_EVENT_TYPES as string[])))
+      .fetch()) as any[];
+    const freshHistory = history.filter(
+      (h) => h._raw._status === 'created' && freshIds.has(h.workOrderId),
+    );
+
+    await database.write(async () => {
+      // History first — nothing may outlive the work order it points at.
+      for (const row of [...freshHistory, ...fresh]) await row.destroyPermanently();
+    });
+
+    const skipped = wos.length - fresh.length;
+    Alert.alert(
+      'Cleared tags',
+      `Deleted ${fresh.length} WO + ${freshHistory.length} history rows.` +
+        (skipped > 0 ? `\nSkipped ${skipped} already-synced WO — those must not be deleted.` : ''),
+    );
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -628,6 +893,14 @@ export function DevProbes({ userId, role }: Props) {
       />
       <DevButton label="Dump H action guards (vs on-screen buttons)" onPress={dumpActions} />
       <DevButton label="Dump push queue (_status per table)" onPress={dumpPushQueue} />
+      <DevButton
+        label="Toggle I-fixture WO (COMPLETED · mine · ready to report)"
+        onPress={toggleSeedWoI}
+      />
+      <DevButton label="Dump push preview (what drafts withhold)" onPress={dumpPushPreview} />
+      <DevButton label="Dump upload queue + derived URLs" onPress={dumpUploads} />
+      <DevButton label="Dump tag state (J: gate · blocks · orphan pairs)" onPress={dumpTagState} />
+      <DevButton label="Clear my unsynced tags (J)" onPress={clearTags} />
     </Card>
   );
 }

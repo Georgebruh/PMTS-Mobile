@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { getSessionToken, useSession } from '../auth/session';
 import { database } from '../database/database';
 import { pendingChanges, sync, SyncError } from '../database/syncEngine';
+import { flushUploads } from '../report/uploader';
 
 export type SyncPhase = 'idle' | 'syncing' | 'offline' | 'error';
 
@@ -91,6 +92,13 @@ async function runOnce(): Promise<void> {
   useSyncStatus.setState({ phase: 'syncing', errorMessage: null });
   try {
     await sync(getSessionToken);
+
+    // Feature I: queued photos and signatures go up AFTER the rows do. Each
+    // success writes the report's URL columns, which trips the local-write
+    // trigger below, so the filled-in URLs ride the next round — no extra
+    // plumbing, and a report is never held back waiting on a file.
+    await flushUploads(getSessionToken);
+
     retryDelayMs = RETRY_BASE_MS;
     useSyncStatus.setState({
       phase: 'idle',
