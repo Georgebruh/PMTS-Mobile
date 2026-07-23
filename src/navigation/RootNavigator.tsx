@@ -1,9 +1,11 @@
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { flushPendingNavigation } from '../notify/navigation';
 import { MaintenanceReportScreen } from '../screens/MaintenanceReportScreen';
 import { TagForRepairScreen } from '../screens/TagForRepairScreen';
 import { theme } from '../theme';
+import { navigationRef } from './navigationRef';
 import { TabNavigator } from './TabNavigator';
 import type { RootStackParamList } from './types';
 
@@ -26,7 +28,9 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 // inside it — see the note on RootStackParamList.
 export function RootNavigator() {
   return (
-    <NavigationContainer theme={navTheme}>
+    // ref + onReady let a notification tap deep-link even when it arrived before
+    // any screen was focused — Feature M's cold-start path (see notify/navigation.ts).
+    <NavigationContainer theme={navTheme} ref={navigationRef} onReady={flushPendingNavigation}>
       <RootStack.Navigator screenOptions={{ headerShown: false }}>
         <RootStack.Screen name="Tabs" component={TabNavigator} />
         <RootStack.Screen
