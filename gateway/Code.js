@@ -50,6 +50,12 @@ function route_(e, method) {
     if (method === 'POST' && path === 'upload') {
       return json_(handleUpload_(parseBody_(e)));
     }
+    if (method === 'POST' && path === 'registerPush') {
+      return json_(handleRegisterPush_(parseBody_(e)));
+    }
+    if (method === 'POST' && path === 'unregisterPush') {
+      return json_(handleUnregisterPush_(parseBody_(e)));
+    }
     if (method === 'GET' && path === 'ping') {
       return json_({ ok: true, service: 'pmts-gateway', time: new Date().toISOString() });
     }
@@ -79,9 +85,10 @@ function json_(obj) {
  * the Feature I upload folder is writable.
  *
  * Re-run this after ANY change to appsscript.json's oauthScopes. Adding the
- * Drive scope for /upload does not take effect until the script is
- * re-authorized, and a web app deployed without the new grant fails at the
- * first DriveApp call rather than at deploy time.
+ * Drive scope for /upload did not take effect until the script was
+ * re-authorized; the same is now true for the script.external_request scope
+ * Feature M adds for the Expo push send — a web app deployed without the new
+ * grant fails at the first UrlFetchApp call rather than at deploy time.
  */
 function smokeCheck() {
   getRequiredProp_('PMTS_TOKEN_SECRET');
@@ -99,4 +106,9 @@ function smokeCheck() {
   );
   probe.setTrashed(true);
   Logger.log('OK: upload folder "' + folder.getName() + '" is writable');
+
+  // Feature M — create/verify the gateway-owned notification tabs (the app never
+  // sees these) so the first assignment does not race their creation.
+  Logger.log('OK: tab "' + deviceTokensSheet_().getName() + '" ready');
+  Logger.log('OK: tab "' + notifLogSheet_().getName() + '" ready');
 }

@@ -12,9 +12,10 @@
     },
     "android": {
       "package": "com.aboitiz.pmtsystem",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
+        "foregroundImage": "./assets/PMTICON.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -37,10 +38,23 @@
           "cameraPermission": "PMTS needs the camera so you can photograph equipment for a maintenance report.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E5231B",
+          "defaultChannel": "default"
+        }
       ]
     ],
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3f5ac67f-2111-4ef5-9a69-212a8771da0c"
+      }
+    },
+    "owner": "georgebruhr"
   }
 }

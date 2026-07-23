@@ -43,3 +43,7 @@ gateway/.clasp.json
 # generated native folders
 /ios
 /android
+
+# Firebase service-account key (FCM V1) — SECRET, never commit. google-services.json
+# is intentionally NOT ignored (it holds only public identifiers and builds need it).
+*firebase-adminsdk*.json

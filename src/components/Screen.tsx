@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { theme } from '../theme';
-import { Icon } from './Icon';
+import { NotificationBell } from './NotificationBell';
 import { OfflineBanner } from './OfflineBanner';
 import { ProfileButton } from './ProfileButton';
 import { SyncIndicator } from './SyncIndicator';
@@ -11,8 +11,6 @@ import { SyncIndicator } from './SyncIndicator';
 type Props = {
   title: string;
   dateLine?: string;
-  /** Shows the notification dot on the bell (Feature M wires the real state). */
-  hasNotifications?: boolean;
   /**
    * Default: body is a ScrollView with the standard screen padding. Pass false
    * when the body hosts its own scroll container (e.g. the Asset List's
@@ -26,7 +24,7 @@ type Props = {
 // Tab-screen scaffold from the mockup: header (title + live sync indicator +
 // bell), offline banner, optional date line, scrollable body. Bottom padding
 // leaves room for the floating nav pill + FAB that Feature D adds.
-export function Screen({ title, dateLine, hasNotifications, scroll = true, children }: Props) {
+export function Screen({ title, dateLine, scroll = true, children }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -50,10 +48,7 @@ export function Screen({ title, dateLine, hasNotifications, scroll = true, child
           <HeaderIconButton>
             <SyncIndicator />
           </HeaderIconButton>
-          <HeaderIconButton>
-            <Icon name="bell" />
-            {hasNotifications && <NotificationDot />}
-          </HeaderIconButton>
+          <NotificationBell />
           <ProfileButton />
         </View>
       </View>
@@ -101,23 +96,5 @@ function HeaderIconButton({ children }: { children: ReactNode }) {
     >
       {children}
     </View>
-  );
-}
-
-function NotificationDot() {
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        top: 7,
-        right: 8,
-        width: 7,
-        height: 7,
-        borderRadius: 3.5,
-        backgroundColor: theme.colors.notifDot,
-        borderWidth: 1.5,
-        borderColor: theme.colors.bg,
-      }}
-    />
   );
 }
