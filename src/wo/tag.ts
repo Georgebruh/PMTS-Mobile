@@ -183,8 +183,8 @@ export type NewWoFields = {
 export function buildWoFields(asset: TaggableAsset, viewer: Tagger): NewWoFields {
   return {
     // Display codes are server-owned, written empty — the same convention as
-    // report_code (Feature I) and crew_code (Feature H). See the standing ⚠️ in
-    // the implementation plan: nothing assigns these yet.
+    // report_code (Feature I) and crew_code (Feature H). The gateway mints one
+    // on the first push (Feature N's assignDisplayCodes_), so it fills in on sync.
     woCode: '',
     assetId: asset.id,
     // Denormalized from the asset so the app-wide tier-first sort and the
