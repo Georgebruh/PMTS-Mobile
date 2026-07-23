@@ -189,6 +189,13 @@ function handlePush_(body) {
     // under this lock. Guarded on the push actually carrying reports so an
     // ordinary work-order push does not pay for a full three-tab scan.
     if (changes.maintenance_reports) reconcileApprovals_();
+
+    // Feature M — turn the just-landed state into push notifications, AFTER
+    // reconcile so server-spawned rework/unassigned WOs also notify. Still under
+    // this lock (like Upload.js's Drive write) so a concurrent push cannot claim
+    // the same event keys and double-ring. Guarded on the tables that can
+    // produce a notification so an unrelated push pays nothing.
+    if (changes.work_orders || changes.maintenance_reports) dispatchNotifications_();
   } finally {
     lock.releaseLock();
   }
