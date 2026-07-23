@@ -1,4 +1,5 @@
 import { Q } from '@nozbe/watermelondb';
+import * as Notifications from 'expo-notifications';
 import { Alert, Pressable, Text } from 'react-native';
 
 import { areaLockFor, assetLockClauses, matchesLockJs, parseList } from '../../asset/lock';
@@ -41,6 +42,9 @@ import { WO_STATUS, WO_TYPE } from '../../wo/status';
 import { APP_EVENT_TYPES, findOpenRepair, tagGate, type OpenRepairCandidate } from '../../wo/tag';
 import type { ReportRecord, WoRecord } from '../../wo/types';
 import type { ReportRecord as MaintReportRecord } from '../../report/types';
+import { fetchExpoPushToken, getProjectId } from '../../notify/registration';
+import { parseNotifData, routeFromNotification } from '../../notify/route';
+import { currentRouteSession } from '../../notify/routing';
 import { approvalGate, approvalOutcome, APPROVAL_STATUS } from '../../staff/approval';
 import { assignGate, eligibleStaff } from '../../staff/assign';
 import { buildNameMap, nameFor } from '../../staff/naming';
@@ -88,6 +92,25 @@ const WO_CODES_H = [
   'TEST-H-4',
   'TEST-H-5',
   'TEST-H-6',
+];
+
+// Feature K fixture: nine work orders straddling every calendar-preset
+// boundary. With ONLY this fixture seeded, the 1-Day (today) preset returns
+// exactly 3 — K-2 (t1) → K-1 (t2) → K-3 (t3), one of them CLOSED, proving the
+// calendar shows all statuses. K-8 has a null due date and belongs to NO range;
+// K-9 (−40d, CLOSED) surfaces only under a custom range reaching back a month.
+// The week/month presets shift with the run date, so the range dump proves them
+// by sql==js agreement and prints each preset's members to compare on screen.
+const WO_CODES_K = [
+  'TEST-K-1',
+  'TEST-K-2',
+  'TEST-K-3',
+  'TEST-K-4',
+  'TEST-K-5',
+  'TEST-K-6',
+  'TEST-K-7',
+  'TEST-K-8',
+  'TEST-K-9',
 ];
 
 // Feature L fixture. Work orders spanning the assignment queue (unassigned, one
@@ -901,6 +924,105 @@ export function DevProbes({ userId, role }: Props) {
     );
   };
 
+  // ---------- Feature K ----------
+
+  // Nine work orders around every preset boundary (see WO_CODES_K). Creation
+  // order is shuffled versus the frozen sort so the tier tie-break is real.
+  const toggleSeedWosK = async () => {
+    const existing = await database
+      .get('work_orders')
+      .query(Q.where('wo_code', Q.oneOf(WO_CODES_K)))
+      .fetch();
+    if (existing.length > 0) {
+      await database.write(async () => {
+        for (const wo of existing) await wo.destroyPermanently();
+      });
+      return;
+    }
+
+    const assets = await database.get('assets').query(Q.take(1)).fetch();
+    if (assets.length === 0) {
+      Alert.alert('No assets yet', 'Seed the assets tab in the sheet and sync first.');
+      return;
+    }
+    const asset: any = assets[0];
+    const bounds = todayBounds();
+    const DAY = 24 * 60 * 60 * 1000;
+    const H = 60 * 60 * 1000;
+    const at = (offset: number) => new Date(bounds.start + offset);
+
+    const rows: {
+      code: string;
+      tier: number;
+      status: string;
+      due: Date | null;
+      who: string | null;
+    }[] = [
+      { code: 'TEST-K-2', tier: 1, status: WO_STATUS.ASSIGNED, due: at(9 * H), who: userId }, // today
+      { code: 'TEST-K-1', tier: 2, status: WO_STATUS.IN_PROGRESS, due: at(9 * H), who: userId }, // today
+      { code: 'TEST-K-3', tier: 3, status: WO_STATUS.CLOSED, due: at(9 * H), who: userId }, // today, CLOSED
+      { code: 'TEST-K-4', tier: 1, status: WO_STATUS.COMPLETED, due: at(-15 * H), who: userId }, // yesterday
+      { code: 'TEST-K-5', tier: 2, status: WO_STATUS.UNASSIGNED, due: at(33 * H), who: OTHER_USER }, // tomorrow, other assignee
+      { code: 'TEST-K-6', tier: 1, status: WO_STATUS.ASSIGNED, due: at(8 * DAY + 9 * H), who: userId }, // +8 days
+      { code: 'TEST-K-7', tier: 2, status: WO_STATUS.ASSIGNED, due: at(40 * DAY + 9 * H), who: userId }, // +40 days
+      { code: 'TEST-K-8', tier: 1, status: WO_STATUS.ASSIGNED, due: null, who: userId }, // null → no range
+      { code: 'TEST-K-9', tier: 3, status: WO_STATUS.CLOSED, due: at(-40 * DAY + 9 * H), who: userId }, // −40 days
+    ];
+
+    await database.write(async () => {
+      for (const row of rows) {
+        await database.get('work_orders').create((w: any) => {
+          w.asset.set(asset);
+          w.woCode = row.code;
+          w.tier = row.tier;
+          w.woType = WO_TYPE.PMS;
+          w.status = row.status;
+          w.assignedTo = row.who;
+          w.createdBy = userId;
+          w.dueDate = row.due;
+          w.site = asset.site;
+          w.location = asset.location;
+        });
+      }
+    });
+  };
+
+  // Feature K's standing hand query, and the on-device proof of the done-when:
+  // for every concrete preset (custom excepted — it needs a user pick), count
+  // the work orders due in range through the shared rangeClauses AND through the
+  // independent plain-JS matchesRangeJs over a full-table fetch. The two must
+  // agree, and the printed members (tier-sorted) must match the screen for that
+  // preset. A null-due row must appear in none of them.
+  const dumpRangeCounts = async () => {
+    const bounds = todayBounds();
+    const today = new Date(bounds.start);
+
+    const allWos = (await database.get('work_orders').query().fetch()) as unknown as WoRecord[];
+
+    const lines: string[] = [];
+    for (const preset of CALENDAR_PRESETS) {
+      if (preset === 'custom') continue; // depends on a picked span
+      const range = rangeForPreset(preset, today, today);
+      const rows = (await database
+        .get('work_orders')
+        .query(...rangeClauses(range))
+        .fetch()) as unknown as WoRecord[];
+      const sql = rows.length;
+      const js = allWos.filter((wo) => matchesRangeJs(wo, range)).length;
+      const order = [...rows].sort(woCompare).map((w) => w.woCode || w.id.slice(0, 4)).join(' → ');
+      lines.push(
+        `${formatRangeLabel(preset, range)} [${preset}]: sql=${sql} js=${js}${sql === js ? '' : '  ⚠ MISMATCH'}`,
+      );
+      lines.push(`   ${order || '(empty)'}`);
+    }
+
+    const nullDue = allWos.filter((wo) => wo.dueDate === null).length;
+    lines.push('', `null-due WOs (must be in NO range): ${nullDue}`);
+
+    console.log(`[DevProbes] range dump\n${lines.join('\n')}`);
+    Alert.alert('Calendar ranges (sql vs js)', lines.join('\n'));
+  };
+
   // ---------- Feature L ----------
 
   // Seeds the whole staff-tab fixture (7 work orders, 5 reports, 3 users) in one
@@ -1079,6 +1201,103 @@ export function DevProbes({ userId, role }: Props) {
     Alert.alert('Staff state (L)', lines.join('\n'));
   };
 
+  // ---------- Feature M ----------
+
+  // Four LOCAL notifications through the real OS pipeline — no server, no push
+  // token, no Expo credentials needed. One per kind stamped with MY uid, plus a
+  // wrong-uid copy that must never deep-link (the shared-device guard).
+  //
+  // Stay foregrounded: no banners (the handler suppresses them), four bell
+  // entries appear as they fire. Background the app within ~4s instead: real
+  // banners, and each tap must land on the right screen — the Staff kinds only
+  // while the EFFECTIVE role is L2. Targets reuse a real WO/report id when one
+  // is mirrored, so the tap lands on a live detail screen; with an empty DB the
+  // fallback ids prove the tolerant missing-row path instead.
+  const scheduleNotifsM = async () => {
+    const wos = await database.get('work_orders').query(Q.take(1)).fetch();
+    const reports = await database.get('maintenance_reports').query(Q.take(1)).fetch();
+    const woId = wos[0]?.id ?? 'TEST-M-MISSING-WO';
+    const reportId = reports[0]?.id ?? 'TEST-M-MISSING-REPORT';
+
+    const mk = (title: string, data: Record<string, string>, seconds: number) =>
+      Notifications.scheduleNotificationAsync({
+        content: { title, body: `dev probe · ${JSON.stringify(data)}`, data },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          channelId: 'default',
+          seconds,
+        },
+      });
+
+    await mk('TEST-M assigned to you', { kind: 'wo_assigned', uid: userId, woId }, 4);
+    await mk('TEST-M report awaiting approval', { kind: 'report_pending', uid: userId, reportId }, 8);
+    await mk('TEST-M new unassigned WO', { kind: 'wo_unassigned', uid: userId, woId }, 12);
+    await mk(
+      'TEST-M wrong uid — tap must NOT deep-link',
+      { kind: 'wo_assigned', uid: 'TEST-M-OTHER-USER', woId },
+      16,
+    );
+
+    Alert.alert(
+      'Scheduled 4 local notifications',
+      'Firing at +4s / +8s / +12s / +16s. Foreground → bell entries only. ' +
+        'Background now → banners; taps must respect kind × role × uid.',
+    );
+  };
+
+  // The client half of the registration story: permission, projectId, and the
+  // Expo push token this device would register. The server half (device_tokens
+  // row, notifications_log) is gateway-owned and invisible here by design —
+  // read it via the sheet or the editor-run dumpNotifyPlan().
+  const dumpNotifRegistration = async () => {
+    const perm = await Notifications.getPermissionsAsync();
+    const projectId = getProjectId();
+    // fetchExpoPushToken re-asks permission if askable, then hits the native
+    // module — exactly what usePushRegistration does at sign-in.
+    const token = await fetchExpoPushToken();
+
+    const lines = [
+      `permission: ${perm.status} (granted=${perm.granted} canAskAgain=${perm.canAskAgain})`,
+      `projectId: ${projectId ?? '(none — run eas init; registration is skipped)'}`,
+      `expo token: ${token ?? '(null — see console warn for which gate failed)'}`,
+      '',
+      'Server-side state is gateway-owned: check the device_tokens tab, or run',
+      'dumpNotifyPlan() in the Apps Script editor for plan + token counts.',
+    ];
+
+    console.log(`[DevProbes] notif registration\n${lines.join('\n')}`);
+    Alert.alert('Push registration (M)', lines.join('\n'));
+  };
+
+  // Replays the cold-start decision on demand: the same OS response
+  // getLastNotificationResponseAsync hands the routing hook at launch, pushed
+  // through the same parse → uid/role-guard pipeline, with the verdict printed
+  // instead of navigated. Kill the app, tap a notification, reopen DevProbes:
+  // this must show the response and the exact target the launch acted on.
+  const dumpColdStartM = async () => {
+    const response = await Notifications.getLastNotificationResponseAsync();
+    if (!response) {
+      Alert.alert('Cold-start replay (M)', 'No notification response on record for this launch.');
+      return;
+    }
+
+    const req = response.notification.request;
+    const data = parseNotifData(req.content.data);
+    const session = currentRouteSession();
+    const target = data ? routeFromNotification(data, session) : null;
+
+    const lines = [
+      `response id: ${req.identifier}`,
+      `title: ${req.content.title ?? '(none)'}`,
+      `parsed: ${data ? JSON.stringify(data) : 'REJECTED (not ours / malformed)'}`,
+      `session: uid=${session.uid?.slice(0, 8) ?? 'null'}… role=${session.role ?? 'null'}`,
+      `route verdict: ${target ? JSON.stringify(target) : 'NO NAVIGATION (guard refused or malformed)'}`,
+    ];
+
+    console.log(`[DevProbes] cold-start replay\n${lines.join('\n')}`);
+    Alert.alert('Cold-start replay (M)', lines.join('\n'));
+  };
+
   return (
     <Card style={{ marginTop: theme.spacing.md, padding: theme.spacing.lg, gap: theme.spacing.sm }}>
       <Text style={theme.text.cardTitle}>DEV · Dashboard + list probes</Text>
@@ -1110,10 +1329,24 @@ export function DevProbes({ userId, role }: Props) {
       <DevButton label="Dump tag state (J: gate · blocks · orphan pairs)" onPress={dumpTagState} />
       <DevButton label="Clear my unsynced tags (J)" onPress={clearTags} />
       <DevButton
+        label="Toggle 9 K-fixture WOs (straddle every preset boundary)"
+        onPress={toggleSeedWosK}
+      />
+      <DevButton label="Dump calendar ranges (sql vs js) per preset" onPress={dumpRangeCounts} />
+      <DevButton
         label="Toggle L fixture (2 unassigned · 4 pending · 1 rejected · 3 staff)"
         onPress={toggleSeedL}
       />
       <DevButton label="Dump staff state (L: assignGate · eligible · approvalGate)" onPress={dumpStaffState} />
+      <DevButton
+        label="Schedule 4 local notifs (M: 3 kinds + wrong uid)"
+        onPress={scheduleNotifsM}
+      />
+      <DevButton
+        label="Dump push registration (M: perm · projectId · token)"
+        onPress={dumpNotifRegistration}
+      />
+      <DevButton label="Replay cold-start response (M: parse · guard · target)" onPress={dumpColdStartM} />
     </Card>
   );
 }
