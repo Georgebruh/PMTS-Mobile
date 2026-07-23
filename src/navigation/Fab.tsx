@@ -12,10 +12,10 @@ import { theme } from '../theme';
 const EDGE = 18;
 const ACTION_SIZE = 46;
 
-// Add Asset still has no scheduled feature (flagged in the implementation plan).
-// Tag Asset for Repair is live as of Feature J.
-const addAssetStub = () =>
-  Alert.alert('Add Asset', 'Adding assets from the app is not available yet.');
+// Add Asset has no backing feature yet (the standing ⚠️ from Feature D). The
+// speed-dial action is kept for discoverability with wording that sets the
+// expectation; Tag Asset for Repair is live as of Feature J.
+const addAssetStub = () => Alert.alert('Add Asset', 'Coming in a future update.');
 
 // The persistent FAB (Feature D), rendered inside BottomBar's full-screen
 // layer. L1: a single direct Tag-for-Repair action. L2: a speed-dial — the
