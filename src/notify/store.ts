@@ -19,12 +19,22 @@ export type NotifItem = {
   read: boolean;
 };
 
+/** OS notification permission, as last observed by push registration. */
+export type NotifPermission = 'unknown' | 'granted' | 'denied';
+
 type NotifStoreState = {
   items: NotifItem[];
+  /**
+   * Feature N — the OS permission state, so the bell can tell the user when
+   * system banners will not arrive. In-app notifications still work regardless;
+   * this only governs the "!" indicator and the sheet's Settings hint.
+   */
+  permission: NotifPermission;
   add: (item: NotifItem) => void;
   markRead: (id: string) => void;
   markAllRead: () => void;
   clear: () => void;
+  setPermission: (permission: NotifPermission) => void;
 };
 
 // Caps memory; the bell is a recent-activity list, not an archive.
@@ -32,6 +42,7 @@ const MAX_ITEMS = 50;
 
 export const useNotifStore = create<NotifStoreState>((set) => ({
   items: [],
+  permission: 'unknown',
   add: (item) =>
     set((s) => {
       if (s.items.some((i) => i.id === item.id)) return s; // same OS id → ignore
@@ -41,7 +52,14 @@ export const useNotifStore = create<NotifStoreState>((set) => ({
     set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, read: true } : i)) })),
   markAllRead: () => set((s) => ({ items: s.items.map((i) => ({ ...i, read: true })) })),
   clear: () => set({ items: [] }),
+  setPermission: (permission) => set({ permission }),
 }));
+
+/** True when the OS has refused notification permission — the bell shows its
+ *  "!" indicator and the sheet offers a path to Settings. */
+export function selectOsNotificationsDenied(s: NotifStoreState): boolean {
+  return s.permission === 'denied';
+}
 
 /** Unread tally for the header dot. Stable selector for zustand. */
 export function selectUnreadCount(s: NotifStoreState): number {
