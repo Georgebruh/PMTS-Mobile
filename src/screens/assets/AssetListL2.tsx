@@ -8,6 +8,7 @@ import { ASSETS_PER_PAGE, distinctValues, type AssetFilter } from '../../asset/q
 import { AssetFilterModal } from '../../components/AssetFilterModal';
 import { AssetListItem } from '../../components/AssetListItem';
 import { EmptyState } from '../../components/EmptyState';
+import { LoadingState } from '../../components/LoadingState';
 import { Pagination } from '../../components/Pagination';
 import { Screen } from '../../components/Screen';
 import { SearchField } from '../../components/SearchField';
@@ -75,6 +76,12 @@ export function AssetListL2({ lock, onOpenAsset }: Props) {
         />
       </View>
 
+      {rows === undefined && (
+        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md }}>
+          <LoadingState />
+        </View>
+      )}
+
       {rows !== undefined && (
         <Text
           style={[
@@ -116,6 +123,7 @@ export function AssetListL2({ lock, onOpenAsset }: Props) {
                   <AssetListItem
                     key={asset.id}
                     asset={asset}
+                    fingerprint={asset.updatedAt?.getTime() ?? 0}
                     onPress={() => onOpenAsset(asset.id)}
                   />
                 ))}
