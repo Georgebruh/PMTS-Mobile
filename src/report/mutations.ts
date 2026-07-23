@@ -20,7 +20,13 @@ import { database } from '../database/database';
 import type { Viewer } from '../wo/actions';
 import { nextStatusFor } from '../wo/actions';
 import type { WoRecord } from '../wo/types';
-import { APPROVAL_PENDING, APPROVAL_REJECTED, isReportEditable, reportGate } from './actions';
+import {
+  APPROVAL_PENDING,
+  APPROVAL_REJECTED,
+  canSubmitReport,
+  isReportEditable,
+  reportGate,
+} from './actions';
 import { planParamWrites } from './params';
 import type { ParamRecord, ReportRecord, UploadRecord } from './types';
 import { UPLOAD_KIND } from './urls';
@@ -251,6 +257,13 @@ export async function submitReport(
       };
       if (!canSubmit(view)) {
         return fail(validateSubmit(view)[0]?.message ?? 'This report is not complete.');
+      }
+
+      // Belt-and-suspenders: the guards above already refuse each failure with a
+      // specific message; this shared precondition is the single source of truth
+      // the Submit button is meant to share, asserted so the two cannot drift.
+      if (!canSubmitReport(wo as WoRecord, report as ReportRecord, viewer, view)) {
+        return fail('This report cannot be submitted right now.');
       }
 
       await applyForm(report, form);
