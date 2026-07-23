@@ -40,7 +40,10 @@ function uniqueName(extension: string): string {
 
 export type CaptureResult =
   | { ok: true; uri: string; mime: string }
-  | { ok: false; error: string }
+  // `denied` marks a permission refusal specifically — the caller surfaces those
+  // as a persistent "Open Settings" affordance rather than a transient alert,
+  // because the fix is in the OS settings, not a retry.
+  | { ok: false; error: string; denied?: boolean }
   | { ok: false; cancelled: true };
 
 const CANCELLED: CaptureResult = { ok: false, cancelled: true };
@@ -78,6 +81,7 @@ export async function capturePhotoFromCamera(): Promise<CaptureResult> {
     if (!permission.granted) {
       return {
         ok: false,
+        denied: true,
         error: 'Camera access is off. Enable it in Settings to photograph equipment.',
       };
     }
@@ -103,6 +107,7 @@ export async function capturePhotoFromLibrary(): Promise<CaptureResult> {
     if (!permission.granted) {
       return {
         ok: false,
+        denied: true,
         error: 'Photo access is off. Enable it in Settings to attach existing photos.',
       };
     }
