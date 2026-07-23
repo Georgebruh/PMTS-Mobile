@@ -1,14 +1,13 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 
-import { Card } from '../../components/Card';
+import { EmptyState } from '../../components/EmptyState';
 import { SectionHead } from '../../components/SectionHead';
 import { SeeAllRow } from '../../components/SeeAllRow';
 import { WorkOrderCard } from '../../components/WorkOrderCard';
 import type { HomeStackParamList } from '../../navigation/types';
-import { theme } from '../../theme';
 import { useWoPreview } from '../../wo/hooks';
 import type { WoListFilter } from '../../wo/queries';
 
@@ -27,10 +26,10 @@ export function WoPreviewSection({ assignedTo }: { assignedTo?: string }) {
     <>
       <SectionHead title="Work Orders" />
       {preview.length === 0 ? (
-        <Card style={{ padding: theme.spacing.lg, gap: 4 }}>
-          <Text style={theme.text.cardTitle}>No open work orders</Text>
-          <Text style={theme.text.caption}>New and synced-in work orders appear here.</Text>
-        </Card>
+        <EmptyState
+          title="No open work orders"
+          caption="New and synced-in work orders appear here."
+        />
       ) : (
         <View style={{ gap: 10 }}>
           {preview.map((wo) => (

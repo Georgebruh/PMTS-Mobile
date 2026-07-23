@@ -11,6 +11,7 @@ import { useRole } from '../auth/session';
 import { AssetListItem } from '../components/AssetListItem';
 import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
+import { LoadingState } from '../components/LoadingState';
 import { SearchField } from '../components/SearchField';
 import type { RootStackParamList } from '../navigation/types';
 import { theme } from '../theme';
@@ -58,6 +59,7 @@ export function TagForRepairScreen({ navigation }: Props) {
     return (
       <AssetListItem
         asset={item}
+        fingerprint={item.updatedAt?.getTime() ?? 0}
         unavailableNote={blocked ? 'Already has an open repair work order' : null}
         onPress={busy ? undefined : () => void onPick(item)}
       />
@@ -75,6 +77,12 @@ export function TagForRepairScreen({ navigation }: Props) {
       <View style={{ paddingHorizontal: theme.spacing.xl }}>
         <SearchField value={search} onChangeText={setSearch} />
       </View>
+
+      {!ready && (
+        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md }}>
+          <LoadingState caption="Loading assets…" />
+        </View>
+      )}
 
       {ready && (
         <Text

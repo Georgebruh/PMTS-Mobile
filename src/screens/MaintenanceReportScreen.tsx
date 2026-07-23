@@ -19,6 +19,7 @@ import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
 import { Icon } from '../components/Icon';
 import { InfoCard, type InfoRowSpec } from '../components/InfoCard';
+import { LoadingState } from '../components/LoadingState';
 import { PhotoGrid } from '../components/PhotoGrid';
 import { SignaturePad, type PadSize } from '../components/SignaturePad';
 import { TextField } from '../components/TextField';
@@ -91,6 +92,9 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
   const [busy, setBusy] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const [signing, setSigning] = useState(false);
+  // A camera/library permission refusal, held so the photo grid can show a
+  // persistent Open Settings affordance rather than a one-off alert.
+  const [photoPermissionMsg, setPhotoPermissionMsg] = useState<string | null>(null);
 
   const seeded = useRef(false);
   const exiting = useRef(false);
@@ -209,9 +213,18 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
 
     if (!captured.ok) {
       setBusy(false);
-      if (!('cancelled' in captured)) Alert.alert('Photo unavailable', captured.error);
+      if ('cancelled' in captured) return;
+      // A permission refusal gets the persistent inline Settings affordance in
+      // the grid; any other failure stays a one-off alert.
+      if (captured.denied) {
+        setPhotoPermissionMsg(captured.error);
+      } else {
+        Alert.alert('Photo unavailable', captured.error);
+      }
       return;
     }
+    // Permission came through this time — clear any stale denial notice.
+    setPhotoPermissionMsg(null);
 
     const result = await addPhoto(reportId, captured.uri, captured.mime);
     setBusy(false);
@@ -280,11 +293,14 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
 
   // ---------- render ----------
 
-  // Nothing renders before the report query has emitted once.
+  // A loading card while the report query has not emitted once, rather than a
+  // blank screen behind the header.
   if (report === undefined) {
     return (
       <DetailScreen title="Report" onBack={close}>
-        <View />
+        <View style={{ marginTop: theme.spacing.md }}>
+          <LoadingState />
+        </View>
       </DetailScreen>
     );
   }
@@ -294,6 +310,7 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
       <DetailScreen title="Report" onBack={close}>
         <View style={{ marginTop: theme.spacing.md }}>
           <EmptyState
+            icon="warning"
             title="Report not found"
             caption="It may have been removed by a sync."
           />
@@ -309,8 +326,8 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
   // Auto metadata, read-only. Split into two cards the same way Work Order
   // Detail is, rather than one undifferentiated block.
   const metaRows: InfoRowSpec[] = [
-    // Display codes are server-owned and nothing assigns them yet, so an
-    // app-created report genuinely has none until the backend fills it in.
+    // Display codes are server-owned: the gateway assigns one on the first push
+    // (Feature N), so an app-created report shows '—' only until it syncs.
     { label: 'Report', value: report.reportCode || '—' },
     { label: 'Work Order', value: wo?.woCode || '—' },
     { label: 'Type', value: wo ? (WO_TYPE_LABELS[wo.woType] ?? wo.woType) : '—' },
@@ -374,6 +391,7 @@ export function MaintenanceReportScreen({ navigation, route }: Props) {
             onAdd={onAddPhoto}
             onRemove={onRemovePhoto}
             onRetry={onRetryUpload}
+            permissionMessage={photoPermissionMsg}
             busy={busy}
           />
         )}

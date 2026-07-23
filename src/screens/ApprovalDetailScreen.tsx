@@ -7,6 +7,7 @@ import { ActionButton, ActionRow } from '../components/ActionRow';
 import { DetailHero } from '../components/DetailHero';
 import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
+import { LoadingState } from '../components/LoadingState';
 import { Pill } from '../components/Pill';
 import { ReportReview } from '../components/ReportReview';
 import { TierBadge } from '../components/TierBadge';
@@ -51,10 +52,16 @@ export function ApprovalDetailScreen({ navigation, route }: Props) {
 
   return (
     <DetailScreen title="Review Report" onBack={() => navigation.goBack()}>
+      {report === undefined && (
+        <View style={{ marginTop: theme.spacing.md }}>
+          <LoadingState caption="Loading report…" />
+        </View>
+      )}
       {report !== undefined &&
         (report === null ? (
           <View style={{ marginTop: theme.spacing.md }}>
             <EmptyState
+              icon="warning"
               title="Report not found"
               caption="It may have been removed or already closed by a sync."
             />

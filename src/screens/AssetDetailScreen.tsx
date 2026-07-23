@@ -105,6 +105,7 @@ export function AssetDetailScreen({ navigation, route }: Props) {
         (!permitted ? (
           <View style={{ marginTop: theme.spacing.md }}>
             <EmptyState
+              icon="warning"
               title={asset === null ? 'Asset not found' : 'Asset unavailable'}
               caption={
                 asset === null

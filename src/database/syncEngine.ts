@@ -3,6 +3,7 @@ import { hasUnsyncedChanges, synchronize } from '@nozbe/watermelondb/sync';
 
 import { API_URL } from '../config';
 import { stripLocalOnlyChanges, type ChangeSet } from '../report/push';
+import { isSafeToSync } from '../report/urls';
 import { database } from './database';
 
 export type SyncErrorCode = 'unconfigured' | 'offline' | 'invalid_token' | 'server_error';
@@ -16,6 +17,12 @@ export class SyncError extends Error {
     this.code = code;
   }
 }
+
+// Caps a single gateway round. An Apps Script cold start can legitimately take
+// 15–30s, so the ceiling is generous — its job is only to stop an indefinite
+// hang on a request that will never answer, so the sync manager's backoff can
+// take over. Classified as 'offline' (retryable), same as a dropped connection.
+const SYNC_TIMEOUT_MS = 45_000;
 
 /**
  * POST ${API_URL}?path=sync/pull | sync/push. The route is a query param —
@@ -32,6 +39,9 @@ async function callGateway(
 ): Promise<any> {
   if (!API_URL) throw new SyncError('unconfigured');
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+
   let res: Response;
   try {
     res = await fetch(`${API_URL}?path=${path}`, {
@@ -40,9 +50,15 @@ async function callGateway(
       // OPTIONS); the gateway parses e.postData.contents as JSON regardless.
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ token, ...payload }),
+      signal: controller.signal,
     });
   } catch {
+    // A dropped connection OR our own timeout abort — both retryable. Mapping
+    // the abort to 'offline' hands it to the sync manager's backoff instead of
+    // surfacing an error on a gateway that simply never answered.
     throw new SyncError('offline');
+  } finally {
+    clearTimeout(timeout);
   }
 
   let data: any;
@@ -53,12 +69,19 @@ async function callGateway(
   }
 
   if (!data || data.ok !== true) {
-    // 'inactive' means the account was deactivated after login — for the app
-    // that is the same outcome as an expired token: force a fresh login.
-    const code: SyncErrorCode =
-      data?.error === 'invalid_token' || data?.error === 'inactive'
-        ? 'invalid_token'
-        : 'server_error';
+    let code: SyncErrorCode;
+    if (data?.error === 'invalid_token' || data?.error === 'inactive') {
+      // 'inactive' means the account was deactivated after login — for the app
+      // that is the same outcome as an expired token: force a fresh login.
+      code = 'invalid_token';
+    } else if (data?.error === 'lock_timeout') {
+      // The gateway could not acquire its writer lock in time — transient
+      // contention with another push, safe to retry. Treated as 'offline' so
+      // the sync manager backs off rather than reporting a hard error.
+      code = 'offline';
+    } else {
+      code = 'server_error';
+    }
     throw new SyncError(code, data?.message ?? data?.error);
   }
   return data;
@@ -102,6 +125,8 @@ export async function sync(getToken: () => string | null): Promise<void> {
       // request having happened.
       if (Object.keys(outgoing).length === 0) return;
 
+      warnOnLocalUris(outgoing);
+
       await callGateway('sync/push', token, {
         last_pulled_at: lastPulledAt,
         changes: outgoing,
@@ -115,4 +140,26 @@ export async function sync(getToken: () => string | null): Promise<void> {
 /** True while any local write is still waiting to be pushed. */
 export function pendingChanges(): Promise<boolean> {
   return hasUnsyncedChanges({ database });
+}
+
+/**
+ * Feature N — a canary, not a gate. deriveUrls is the sole writer of
+ * photo_urls / signature_url and only ever writes remote Drive URLs, so a local
+ * file:// (or content://) URI in an outgoing report should be impossible. The
+ * check is free, so assert it: if it ever fires, design gap #6 has regressed and
+ * a local path is one push away from the sheet.
+ */
+function warnOnLocalUris(changes: ChangeSet): void {
+  const reports = changes.maintenance_reports;
+  if (!reports) return;
+  for (const row of [...reports.created, ...reports.updated]) {
+    const photo = typeof row.photo_urls === 'string' ? row.photo_urls : null;
+    const signature = typeof row.signature_url === 'string' ? row.signature_url : null;
+    if (!isSafeToSync(photo) || !isSafeToSync(signature)) {
+      console.warn(
+        `[sync] report ${row.id}: a non-remote URL is about to be pushed ` +
+          '(photo_urls/signature_url) — deriveUrls should have prevented this',
+      );
+    }
+  }
 }

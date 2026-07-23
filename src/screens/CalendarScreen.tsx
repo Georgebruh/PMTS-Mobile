@@ -1,11 +1,12 @@
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CalendarPicker } from '../components/CalendarPicker';
 import { EmptyState } from '../components/EmptyState';
+import { LoadingState } from '../components/LoadingState';
 import { DatePill } from '../components/DatePill';
 import { FilterChips, type ChipItem } from '../components/FilterChips';
 import { Screen } from '../components/Screen';
@@ -73,11 +74,15 @@ export function CalendarScreen({ navigation }: Props) {
     setPreset(next);
   };
 
-  const renderItem = ({ item }: { item: WoRecord }) => (
-    <WorkOrderCard
-      wo={item}
-      onPress={() => navigation.navigate('WorkOrderDetail', { woId: item.id })}
-    />
+  const renderItem = useCallback(
+    ({ item }: { item: WoRecord }) => (
+      <WorkOrderCard
+        wo={item}
+        fingerprint={item.updatedAt?.getTime() ?? 0}
+        onPress={() => navigation.navigate('WorkOrderDetail', { woId: item.id })}
+      />
+    ),
+    [navigation],
   );
 
   return (
@@ -96,8 +101,14 @@ export function CalendarScreen({ navigation }: Props) {
         <FilterChips chips={PRESET_CHIPS} activeKey={preset} onSelect={selectPreset} />
       </View>
 
-      {/* Nothing below the chips renders until the first emission — a stale or
+      {/* A loading card below the chips until the first emission — a stale or
           fake-empty list never flashes under a new range. */}
+      {rows === undefined && (
+        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md }}>
+          <LoadingState />
+        </View>
+      )}
+
       {rows !== undefined && (
         <View style={{ paddingHorizontal: theme.spacing.xl }}>
           <SectionHead title="Scheduled" count={rows.length} />

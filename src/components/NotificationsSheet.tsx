@@ -1,4 +1,4 @@
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { navigateToTarget } from '../notify/navigation';
@@ -6,6 +6,7 @@ import { routeFromNotification } from '../notify/route';
 import { currentRouteSession } from '../notify/routing';
 import {
   formatTimeAgo,
+  selectOsNotificationsDenied,
   selectUnreadCount,
   useNotifStore,
   type NotifItem,
@@ -32,6 +33,7 @@ export function NotificationsSheet({ visible, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const items = useNotifStore((s) => s.items);
   const unread = useNotifStore(selectUnreadCount);
+  const osDenied = useNotifStore(selectOsNotificationsDenied);
   const markRead = useNotifStore((s) => s.markRead);
   const markAllRead = useNotifStore((s) => s.markAllRead);
 
@@ -114,6 +116,43 @@ export function NotificationsSheet({ visible, onClose }: Props) {
             }}
             showsVerticalScrollIndicator={false}
           >
+            {osDenied && (
+              <View
+                style={{
+                  gap: 6,
+                  paddingVertical: theme.spacing.md,
+                  borderBottomWidth: 1,
+                  borderBottomColor: theme.colors.lineFaint,
+                  marginBottom: theme.spacing.sm,
+                }}
+              >
+                <Text style={theme.text.caption}>
+                  System notifications are turned off, so alerts won't reach you outside the
+                  app. You'll still see them here.
+                </Text>
+                <Pressable
+                  onPress={() => void Linking.openSettings()}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                >
+                  {({ pressed }) => (
+                    <Text
+                      style={[
+                        theme.text.caption,
+                        {
+                          color: theme.colors.red,
+                          fontFamily: theme.fonts.bold,
+                          opacity: pressed ? 0.6 : 1,
+                        },
+                      ]}
+                    >
+                      Open Settings
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
             {items.length === 0 ? (
               <Text
                 style={[

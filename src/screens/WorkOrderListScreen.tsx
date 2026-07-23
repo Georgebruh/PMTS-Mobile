@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { useRole, useSession } from '../auth/session';
 import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
 import { FilterChips, type ChipItem } from '../components/FilterChips';
+import { LoadingState } from '../components/LoadingState';
 import { WorkOrderCard } from '../components/WorkOrderCard';
 import type { HomeStackParamList } from '../navigation/types';
 import { theme } from '../theme';
@@ -50,11 +51,15 @@ export function WorkOrderListScreen({ navigation, route }: Props) {
     if (chip) navigation.setParams({ filter: chip.filter });
   };
 
-  const renderItem = ({ item }: { item: WoRecord }) => (
-    <WorkOrderCard
-      wo={item}
-      onPress={() => navigation.navigate('WorkOrderDetail', { woId: item.id })}
-    />
+  const renderItem = useCallback(
+    ({ item }: { item: WoRecord }) => (
+      <WorkOrderCard
+        wo={item}
+        fingerprint={item.updatedAt?.getTime() ?? 0}
+        onPress={() => navigation.navigate('WorkOrderDetail', { woId: item.id })}
+      />
+    ),
+    [navigation],
   );
 
   return (
@@ -67,8 +72,14 @@ export function WorkOrderListScreen({ navigation, route }: Props) {
         <FilterChips chips={chipItems} activeKey={activeKey} onSelect={selectChip} />
       </View>
 
-      {/* Nothing renders below the chips until the first emission — a stale
-          or fake-empty list never flashes under a new title. */}
+      {/* A loading card below the chips until the first emission — a stale or
+          fake-empty list never flashes under a new title. */}
+      {rows === undefined && (
+        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md }}>
+          <LoadingState />
+        </View>
+      )}
+
       {rows !== undefined && (
         <Text
           style={[

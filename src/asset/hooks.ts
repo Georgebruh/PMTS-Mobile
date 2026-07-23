@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useSession } from '../auth/session';
 import { database } from '../database/database';
 import { useObservable } from '../hooks/useObservable';
+import { useStableList } from '../hooks/useStableList';
 import { woCompare } from '../wo/queries';
 import { WO_STATUS } from '../wo/status';
 import { asSubscribable, type WoRecord } from '../wo/types';
@@ -80,11 +81,14 @@ export function useAssetList(
     ],
   );
 
-  return useMemo(() => {
+  const sorted = useMemo(() => {
     if (rows === undefined) return undefined;
     // filter() already copies, so sorting in place never touches the observed array.
     return rows.filter((asset) => matchesSearchJs(asset, filter.search)).sort(assetCompare);
   }, [rows, filter.search]);
+  // Hold the previous reference when the id+updated_at fingerprint is unchanged,
+  // so a spurious observe() emission does not re-render the list.
+  return useStableList(sorted);
 }
 
 /**

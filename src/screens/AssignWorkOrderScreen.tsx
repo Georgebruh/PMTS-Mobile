@@ -10,6 +10,7 @@ import { DetailHero } from '../components/DetailHero';
 import { DetailScreen } from '../components/DetailScreen';
 import { EmptyState } from '../components/EmptyState';
 import { InfoCard, type InfoRowSpec } from '../components/InfoCard';
+import { LoadingState } from '../components/LoadingState';
 import { Pill } from '../components/Pill';
 import { StaffPicker } from '../components/StaffPicker';
 import { TierBadge } from '../components/TierBadge';
@@ -67,10 +68,16 @@ export function AssignWorkOrderScreen({ navigation, route }: Props) {
 
   return (
     <DetailScreen title="Assign Work Order" onBack={() => navigation.goBack()}>
+      {wo === undefined && (
+        <View style={{ marginTop: theme.spacing.md }}>
+          <LoadingState caption="Loading work order…" />
+        </View>
+      )}
       {wo !== undefined &&
         (wo === null ? (
           <View style={{ marginTop: theme.spacing.md }}>
             <EmptyState
+              icon="warning"
               title="Work order not found"
               caption="It may have been removed or reassigned by a sync."
             />

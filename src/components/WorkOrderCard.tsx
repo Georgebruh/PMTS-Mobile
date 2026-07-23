@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { useObservable } from '../hooks/useObservable';
@@ -13,12 +14,21 @@ type Props = {
   wo: WoRecord;
   /** Wired by Feature F's list; the dashboard preview renders without it. */
   onPress?: () => void;
+  /**
+   * Feature N — the row's content fingerprint (its updated_at in ms), supplied
+   * by the list so React.memo can tell a genuinely-changed row from a bystander
+   * re-render. It must be a VALUE, never read off `wo`: WatermelonDB reuses one
+   * mutable instance per id across renders, so a comparator reading `wo` fields
+   * would compare that object with itself and never see a change. Omit it (the
+   * dashboard preview) and the row is simply never memo-skipped.
+   */
+  fingerprint?: number;
 };
 
 // Work-order row with the mockup's .asset-card anatomy: status tile, title,
 // code, location — plus the WO-specific status pill, type pill, and tier
 // badge. Reused as Feature F's list row.
-export function WorkOrderCard({ wo, onPress }: Props) {
+function WorkOrderCardBase({ wo, onPress }: Props) {
   const meta = statusMeta(wo.status);
 
   // Per-row relation observation: the title is the live asset name, so a
@@ -99,3 +109,16 @@ export function WorkOrderCard({ wo, onPress }: Props) {
     </Pressable>
   );
 }
+
+// Skip re-rendering a row whose id and content fingerprint are unchanged — the
+// common case when the parent re-renders for an unrelated reason (search typing,
+// a filter chip). onPress is deliberately excluded: it closes only over stable
+// values (navigation + the row id), so a retained older closure still behaves
+// correctly. Absent fingerprint → never skip, matching the un-memoized behaviour
+// the dashboard preview relies on.
+function areEqual(a: Props, b: Props): boolean {
+  if (a.fingerprint === undefined || b.fingerprint === undefined) return false;
+  return a.wo.id === b.wo.id && a.fingerprint === b.fingerprint;
+}
+
+export const WorkOrderCard = memo(WorkOrderCardBase, areEqual);

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import type { AssetRecord } from '../asset/types';
@@ -16,12 +17,19 @@ type Props = {
    * the rule is much kinder shown up front than as a refusal after the tap.
    */
   unavailableNote?: string | null;
+  /**
+   * Feature N — the row's content fingerprint (its updated_at in ms), supplied
+   * by the list so React.memo can tell a changed row from a bystander re-render.
+   * A VALUE, never read off `asset`: WatermelonDB reuses one mutable instance per
+   * id, so a comparator reading `asset` fields would compare it with itself.
+   */
+  fingerprint?: number;
 };
 
 // Asset row with the mockup's .asset-card anatomy — the same shape as
 // WorkOrderCard so the two lists read as one system. Every field is already on
 // the record, so unlike the WO row this needs no relation observation.
-export function AssetListItem({ asset, onPress, unavailableNote }: Props) {
+function AssetListItemBase({ asset, onPress, unavailableNote }: Props) {
   const unavailable = !!unavailableNote;
 
   return (
@@ -100,3 +108,18 @@ export function AssetListItem({ asset, onPress, unavailableNote }: Props) {
     </Pressable>
   );
 }
+
+// Skip re-rendering an unchanged row on a bystander re-render. unavailableNote is
+// compared because it flips independently of the asset's own fields (the tag
+// picker derives it from a separate open-repair query); onPress is excluded, as
+// it closes only over stable values. Absent fingerprint → never skip.
+function areEqual(a: Props, b: Props): boolean {
+  if (a.fingerprint === undefined || b.fingerprint === undefined) return false;
+  return (
+    a.asset.id === b.asset.id &&
+    a.fingerprint === b.fingerprint &&
+    a.unavailableNote === b.unavailableNote
+  );
+}
+
+export const AssetListItem = memo(AssetListItemBase, areEqual);

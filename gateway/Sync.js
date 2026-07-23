@@ -172,14 +172,27 @@ function handlePush_(body) {
 
   var changes = (body && body.changes) || {};
   var lock = LockService.getScriptLock();
-  lock.waitLock(30 * 1000); // serialize writers; timeout throws → server_error
+  try {
+    lock.waitLock(30 * 1000); // serialize writers
+  } catch (e) {
+    // Could not acquire the writer lock within 30s — another push is mid-write.
+    // Answer with a clear, retryable signal instead of a generic server_error;
+    // the client classifies 'lock_timeout' as retryable and backs off.
+    return { ok: false, error: 'lock_timeout' };
+  }
   try {
     Object.keys(TABLE_SPECS).forEach(function (table) {
       if (!TABLE_SPECS[table].push) return;
       var tableChanges = changes[table];
       if (!tableChanges) return;
       var records = [].concat(tableChanges.created || [], tableChanges.updated || []);
-      if (records.length) pushTable_(table, records);
+      if (records.length) {
+        // Feature N — mint display codes for client-created rows before the
+        // upsert, so wo_code/report_code/crew_code/history_code never reach the
+        // sheet blank. Idempotent: an existing server code is preserved.
+        assignDisplayCodes_(table, records);
+        pushTable_(table, records);
+      }
       // tableChanges.deleted is ignored — no hard deletes in this backend.
     });
 
@@ -317,6 +330,51 @@ function historyRow_(woId, report, eventType, actor, now) {
     event_at: now,
     created_at: now,
   };
+}
+
+/**
+ * Feature N — display-code assignment for client-created rows.
+ *
+ * The app writes new rows with a blank display code; only the server ever mints
+ * one (the pattern reconcileApprovals_ already uses for server-spawned rows).
+ * This closes the standing gap for CLIENT-pushed rows: before each upsert, an
+ * incoming row whose code cell is blank is given one via nextCode_ (the same
+ * PREFIX-YYYY-NNNNNN counter), sharing the 'WO'/'HIST' sequences with reconcile.
+ *
+ * IDEMPOTENT and STABLE. The app keeps re-pushing a row with a blank code until
+ * a later pull brings the assigned one back, so a plain "fill if blank" would
+ * mint a NEW code on every such re-push. Instead, a row that already carries a
+ * server code in the sheet has that code copied back onto the incoming record —
+ * so the upsert re-writes the SAME code, and a re-pushed blank can never clobber
+ * it. Runs under handlePush_'s lock (nextCode_ requires it).
+ */
+var DISPLAY_CODES = {
+  work_orders: { column: 'wo_code', prefix: 'WO' },
+  work_order_crew: { column: 'crew_code', prefix: 'CRW' },
+  maintenance_reports: { column: 'report_code', prefix: 'RPT' },
+  asset_history: { column: 'history_code', prefix: 'HIST' },
+};
+
+function assignDisplayCodes_(table, records) {
+  var cfg = DISPLAY_CODES[table];
+  if (!cfg) return;
+
+  var existingCode = {};
+  readTable_(table).forEach(function (row) {
+    var id = rowId_(row);
+    if (id) existingCode[id] = String(row[cfg.column] == null ? '' : row[cfg.column]).trim();
+  });
+
+  records.forEach(function (rec) {
+    var id = String((rec && rec.id) || '').trim();
+    if (!id) return;
+    var current = existingCode[id];
+    if (current) {
+      rec[cfg.column] = current; // preserve the assigned code; a blank re-push must not wipe it
+    } else if (!String(rec[cfg.column] == null ? '' : rec[cfg.column]).trim()) {
+      rec[cfg.column] = nextCode_(cfg.prefix); // brand-new row → mint one
+    }
+  });
 }
 
 /**
