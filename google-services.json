@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1098389399883",
+    "project_id": "pmt-system-940fb",
+    "storage_bucket": "pmt-system-940fb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1098389399883:android:80ab8f095cb38e517fa0ce",
+        "android_client_info": {
+          "package_name": "com.aboitiz.pmtsystem"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBR3Tu5LYKeMcQoBFDDtP7haWhHP7IOiic"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
