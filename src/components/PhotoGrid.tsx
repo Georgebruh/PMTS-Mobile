@@ -1,4 +1,4 @@
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Linking, Pressable, Text, View } from 'react-native';
 
 import { MAX_PHOTOS } from '../report/validation';
 import type { UploadRecord } from '../report/types';
@@ -16,6 +16,13 @@ type Props = {
    *  see retryUpload(): submit does not wait for Drive, so a submitted report
    *  is exactly when a stuck file most needs a way out. */
   onRetry: (uploadId: string) => void;
+  /**
+   * Feature N — a permission refusal from the last camera/library attempt. Shown
+   * as a persistent inline message with an Open Settings link, because unlike a
+   * transient alert the fix lives in the OS settings and the user needs the path
+   * to it in front of them. Null when the last attempt was fine.
+   */
+  permissionMessage?: string | null;
   busy?: boolean;
 };
 
@@ -30,7 +37,15 @@ const TILE = 96;
  * exists before an upload succeeds. The badge is what communicates upload
  * state; the picture never changes.
  */
-export function PhotoGrid({ photos, editable, onAdd, onRemove, onRetry, busy = false }: Props) {
+export function PhotoGrid({
+  photos,
+  editable,
+  onAdd,
+  onRemove,
+  onRetry,
+  permissionMessage = null,
+  busy = false,
+}: Props) {
   const canAdd = editable && photos.length < MAX_PHOTOS && !busy;
   const anyFailed = photos.some((p) => p.state === UPLOAD_STATE.FAILED);
 
@@ -117,6 +132,28 @@ export function PhotoGrid({ photos, editable, onAdd, onRemove, onRetry, busy = f
           A photo could not be uploaded. Tap its red badge to try again once you have a
           signal.
         </Text>
+      )}
+
+      {permissionMessage !== null && (
+        <View style={{ marginTop: 8, gap: 4 }}>
+          <Text style={[theme.text.micro, { color: theme.colors.red }]}>{permissionMessage}</Text>
+          <Pressable onPress={() => void Linking.openSettings()} hitSlop={6}>
+            {({ pressed }) => (
+              <Text
+                style={[
+                  theme.text.micro,
+                  {
+                    color: theme.colors.maroon,
+                    fontFamily: theme.fonts.bold,
+                    opacity: pressed ? 0.6 : 1,
+                  },
+                ]}
+              >
+                Open Settings
+              </Text>
+            )}
+          </Pressable>
+        </View>
       )}
     </Card>
   );
