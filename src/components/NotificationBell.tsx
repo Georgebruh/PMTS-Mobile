@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
-import { selectUnreadCount, useNotifStore } from '../notify/store';
+import { selectOsNotificationsDenied, selectUnreadCount, useNotifStore } from '../notify/store';
 import { theme } from '../theme';
 import { Icon } from './Icon';
 import { NotificationsSheet } from './NotificationsSheet';
@@ -11,10 +11,12 @@ import { NotificationsSheet } from './NotificationsSheet';
  * store (the ProfileButton pattern), so every tab screen gets the live dot and
  * the sheet with nothing threaded through Screen's props. Still works when OS
  * notification permission is denied: the sheet opens and lists whatever reached
- * the store; only the OS banners are gone.
+ * the store; only the OS banners are gone. Feature N adds a small "!" indicator
+ * for that denied case, and the sheet explains it with a path to Settings.
  */
 export function NotificationBell() {
   const unread = useNotifStore(selectUnreadCount);
+  const osDenied = useNotifStore(selectOsNotificationsDenied);
   const [open, setOpen] = useState(false);
 
   return (
@@ -24,7 +26,11 @@ export function NotificationBell() {
         hitSlop={6}
         accessibilityRole="button"
         accessibilityLabel={
-          unread > 0 ? `Notifications — ${unread} unread` : 'Notifications'
+          osDenied
+            ? 'Notifications — system notifications are turned off'
+            : unread > 0
+              ? `Notifications — ${unread} unread`
+              : 'Notifications'
         }
         style={({ pressed }) => ({
           width: theme.sizes.iconButton,
@@ -37,6 +43,7 @@ export function NotificationBell() {
       >
         <Icon name="bell" />
         {unread > 0 && <NotificationDot />}
+        {osDenied && <PermissionBadge />}
       </Pressable>
 
       <NotificationsSheet visible={open} onClose={() => setOpen(false)} />
@@ -59,5 +66,40 @@ function NotificationDot() {
         borderColor: theme.colors.bg,
       }}
     />
+  );
+}
+
+// OS notifications denied: a red "!" in the opposite corner from the unread dot,
+// so the two never collide. It says "system banners won't arrive"; the sheet
+// carries the full explanation and the Settings link.
+function PermissionBadge() {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        bottom: 5,
+        right: 5,
+        minWidth: 13,
+        height: 13,
+        paddingHorizontal: 2,
+        borderRadius: 6.5,
+        backgroundColor: theme.colors.red,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: theme.colors.bg,
+      }}
+    >
+      <Text
+        style={{
+          color: theme.colors.white,
+          fontSize: 9,
+          lineHeight: 11,
+          fontFamily: theme.fonts.bold,
+        }}
+      >
+        !
+      </Text>
+    </View>
   );
 }
