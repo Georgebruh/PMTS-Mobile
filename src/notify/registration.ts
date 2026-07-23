@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 
 import { useSession } from '../auth/session';
 import { API_URL } from '../config';
+import { useNotifStore } from './store';
 
 /** From `eas init` (written into app.json extra.eas.projectId), or null.
  *  Exported for the DevProbes registration dump. */
@@ -22,10 +23,20 @@ export function getProjectId(): string | null {
 }
 
 async function ensurePermission(): Promise<boolean> {
+  // Record the outcome in the store so the bell can indicate when OS banners
+  // will not arrive. In-app notifications work regardless of this.
+  const setPermission = useNotifStore.getState().setPermission;
   const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
-  if (!current.canAskAgain) return false; // user permanently denied — respect it
+  if (current.granted) {
+    setPermission('granted');
+    return true;
+  }
+  if (!current.canAskAgain) {
+    setPermission('denied'); // user permanently denied — respect it
+    return false;
+  }
   const requested = await Notifications.requestPermissionsAsync();
+  setPermission(requested.granted ? 'granted' : 'denied');
   return requested.granted;
 }
 
