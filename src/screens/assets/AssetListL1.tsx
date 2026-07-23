@@ -1,5 +1,5 @@
 import { FlashList } from '@shopify/flash-list';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import type { AreaLock } from '../../asset/lock';
 import type { AssetRecord } from '../../asset/types';
 import { AssetListItem } from '../../components/AssetListItem';
 import { EmptyState } from '../../components/EmptyState';
+import { LoadingState } from '../../components/LoadingState';
 import { Screen } from '../../components/Screen';
 import { SearchField } from '../../components/SearchField';
 import { theme } from '../../theme';
@@ -26,8 +27,15 @@ export function AssetListL1({ lock, onOpenAsset }: Props) {
   const filter = useMemo(() => ({ search }), [search]);
   const rows = useAssetList(1, lock, filter);
 
-  const renderItem = ({ item }: { item: AssetRecord }) => (
-    <AssetListItem asset={item} onPress={() => onOpenAsset(item.id)} />
+  const renderItem = useCallback(
+    ({ item }: { item: AssetRecord }) => (
+      <AssetListItem
+        asset={item}
+        fingerprint={item.updatedAt?.getTime() ?? 0}
+        onPress={() => onOpenAsset(item.id)}
+      />
+    ),
+    [onOpenAsset],
   );
 
   return (
@@ -36,8 +44,14 @@ export function AssetListL1({ lock, onOpenAsset }: Props) {
         <SearchField value={search} onChangeText={setSearch} />
       </View>
 
-      {/* Nothing renders below the search until the first emission — a stale
-          or fake-empty list never flashes under a new lock. */}
+      {/* A loading card below the search until the first emission — a stale or
+          fake-empty list never flashes under a new lock. */}
+      {rows === undefined && (
+        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md }}>
+          <LoadingState />
+        </View>
+      )}
+
       {rows !== undefined && (
         <Text
           style={[
