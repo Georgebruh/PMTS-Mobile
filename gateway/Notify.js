@@ -198,6 +198,10 @@ var DEVICE_TOKENS_HEADERS = [
 ];
 var NOTIF_LOG_SHEET = 'notifications_log';
 var NOTIF_LOG_HEADERS = ['event_key', 'sent_at'];
+// Feature N — how long a dedup key stays in notifications_log before it is
+// trimmed. Comfortably longer than any event stays actionable, so a re-push of
+// something recent still dedups, while the log cannot grow without bound.
+var NOTIF_LOG_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ---------- pure helpers the I/O leans on (harnessed) ----------
 
@@ -333,6 +337,14 @@ function dispatchNotifications_() {
     users: readTable_('users'),
     alreadyNotified: readNotifiedKeys_(),
   });
+
+  // Feature N — keep the dedup log bounded. It only grows in this function
+  // (appendNotifiedKeys_ below), so trimming here couples growth to cleanup.
+  // Runs under handlePush_'s lock; cheap (one column read, at most one
+  // deleteRows), and placed before the early return so it happens on every
+  // dispatch, not only when there is something new to send.
+  trimNotifLog_();
+
   if (plan.length === 0) return;
 
   var tokenRows = readDeviceTokenRows_();
@@ -546,6 +558,35 @@ function appendNotifiedKeys_(keys) {
     return [k, nowIso];
   });
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 2).setValues(rows);
+}
+
+/**
+ * Feature N — deletes notifications_log rows older than NOTIF_LOG_TTL_MS.
+ *
+ * The log is append-only and each row is stamped at append time, so rows sit in
+ * chronological order and the expired ones form a contiguous block at the top.
+ * That lets a single deleteRows() clear them: scan sent_at (column 2) from the
+ * top, counting the leading run older than the cutoff, then delete that run. A
+ * blank or unparseable timestamp stops the scan — a row we cannot date is never
+ * deleted, and everything below it is newer anyway. `toMs_` comes from Sync.js,
+ * which shares this global scope.
+ */
+function trimNotifLog_() {
+  var sheet = notifLogSheet_();
+  var last = sheet.getLastRow();
+  if (last < 2) return; // header only, or empty
+
+  var cutoff = Date.now() - NOTIF_LOG_TTL_MS;
+  var sentAt = sheet.getRange(2, 2, last - 1, 1).getValues();
+
+  var expired = 0;
+  for (var i = 0; i < sentAt.length; i++) {
+    var ms = toMs_(sentAt[i][0]);
+    if (ms == null || ms >= cutoff) break;
+    expired++;
+  }
+
+  if (expired > 0) sheet.deleteRows(2, expired);
 }
 
 /** { header_name: column_index } from a sheet's header row (normalized names). */
