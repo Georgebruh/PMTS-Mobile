@@ -20,6 +20,9 @@ export type AssetRecord = {
   currentStatusColor: string;
   inChargeEmail: string;
   active: boolean;
+  /** WatermelonDB-managed, bumped on every local write and every synced-in
+   *  update. Feature N fingerprints the list hooks and row memo on it. */
+  updatedAt: Date | null;
 };
 
 export type AssetHistoryRecord = {
