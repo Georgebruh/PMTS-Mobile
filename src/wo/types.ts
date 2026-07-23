@@ -40,6 +40,9 @@ export type WoRecord = {
   createdBy: string;
   site: string;
   location: string;
+  /** WatermelonDB-managed, bumped on every local write and every synced-in
+   *  update. Feature N fingerprints the list hooks and row memo on it. */
+  updatedAt: Date | null;
   asset: {
     id: string;
     observe(): Subscribable<AssetRecord | null>;
