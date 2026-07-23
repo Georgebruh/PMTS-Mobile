@@ -4,6 +4,7 @@ import { AppState } from 'react-native';
 
 import { database } from '../database/database';
 import { useObservable } from '../hooks/useObservable';
+import { useStableList } from '../hooks/useStableList';
 import { todayBounds, type DayBounds } from './dates';
 import type { DateRange } from './ranges';
 import {
@@ -135,7 +136,13 @@ export function useWoList(filter: WoListFilter, bounds: DayBounds): WoRecord[] |
       ),
     [filter.kind, filter.assignedTo, filter.reporterId, bounds.start],
   );
-  return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
+  const sorted = useMemo(
+    () => (rows === undefined ? undefined : [...rows].sort(woCompare)),
+    [rows],
+  );
+  // A fresh observe() array with identical content re-renders the whole list for
+  // nothing; hold the previous reference when the id+updated_at fingerprint matches.
+  return useStableList(sorted);
 }
 
 /**
@@ -158,7 +165,11 @@ export function useWoRange(range: DateRange): WoRecord[] | undefined {
       ),
     [range.start, range.end],
   );
-  return useMemo(() => (rows === undefined ? undefined : [...rows].sort(woCompare)), [rows]);
+  const sorted = useMemo(
+    () => (rows === undefined ? undefined : [...rows].sort(woCompare)),
+    [rows],
+  );
+  return useStableList(sorted);
 }
 
 /**
